@@ -1,0 +1,11 @@
+#!/bin/sh
+LATEX="$(which latex)";
+DVIPNG="$(which dvipng)";
+
+if [ -z "$LATEX" ] || [ -z "$DVIPNG" ]; then
+    echo "latex or dvipng missing. exiting...";
+    exit 1;
+fi
+
+cc -DLATEX=\"$LATEX\" -DDVIPNG=\"$DVIPNG\" mathtex.c -o mathtex
+
