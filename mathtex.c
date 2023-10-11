@@ -554,6 +554,17 @@ static	char tempdir[256] = "\000";	/* temporary work directory */
 #if !defined(MAXGIFSZ)
   #define MAXGIFSZ (131072)		/* max #bytes in output GIF image */
 #endif
+/* ---
+ * misc.
+ * ----- */
+#if !defined(WRITE_STDOUT)
+  #define WRITE_STDOUT 0 /* print result to stdout */
+#endif
+static  int  write_stdout = WRITE_STDOUT;
+#if !defined(NO_CACHE)
+  #define NO_CACHE 0 /* whether to cache result (defaults cache to /tmp/) */
+#endif
+static  int  no_cache = NO_CACHE;
 
 /* ---
  * latex wrapper document template (default, isdepth=0, without depth)
@@ -822,6 +833,8 @@ static STORE mathtexstore[MAXSTORE] = {
  *		-m   0-99, controls verbosity level for debugging output
  *		     >=9 retains all directories and files created
  *		-c   cachepath specifies relative path to cache directory
+ *    -n   override cache to save to /tmp/mathtex/
+ *    -s   write result to stdout
  * --------------------------------------------------------------------------
  * Exits:	0=success (always exits 0, regardless of success/failure)
  * --------------------------------------------------------------------------
@@ -922,7 +935,10 @@ char	*usage1 =			/* usage instructions */
  "            | -f input_file      or read expression from input_file\n"
  "            [ -o output_file ]   write image to ouput_file\n"
  "            [ -m msglevel ]      verbosity / message level\n"
- "            [ -c cache ]         path to cache directory\n",
+ "            [ -c cache ]         path to cache directory\n"
+ "            [ -s write_stdout ]  whether to write result to stdout\n"
+ "            [ -n tmp_cache ]     overrides cache to store images\n"
+ "                                 in /tmp/mathtex/\n",
  *usage2 =				/* second part of usage */
  "Example:\n"
  "  ./mathtex.cgi \"x^2+y^2\" -o equation1\n"
@@ -1020,6 +1036,8 @@ if ( !isquery				/* don't have an html query string */
 	case 'o': strcpy(outfile,field); /* output file for image */
 	        trimwhite(outfile);	/*remove leading/trailing whitespace*/
 	        break;
+  case 's': write_stdout = atoi(field); break;
+  case 'n': no_cache = atoi(field); break;
 	} /* --- end-of-switch(flag) --- */
       } /* --- end-of-if(*argv[argnum]=='-') --- */
     else				/* expression if arg not a -flag */
@@ -1421,14 +1439,14 @@ if ( isempty(expression) )		/* no expression supplied */
 /* ---
  * check for "advertisement"
  * ------------------------- */
-if ( adfrequency > 0 ) {		/* advertising enabled */
-  int	npump = crc16(expression)%16;	/* #times, 0-15, to pump rand() */
-  srand(atoi(timestamp(TZDELTA,4)));	/* init rand() with mmddhhmmss */
-  while ( npump-- >= 0 ) rand();	/* pre-pump rand() before use */
-  if ( rand()%adfrequency == 0 ) {	/* once every adfrequency calls */
-    advertisement(expression,adtemplate); /*wrap expression in advertisement*/
-    if ( strcasestr(hashexpr,"\\advertisement") == NULL ) /* random ad */
-      strchange(0,hashexpr,"\\advertisement "); } } /* signal ad in expr */
+//if ( adfrequency > 0 ) {		/* advertising enabled */
+//  int	npump = crc16(expression)%16;	/* #times, 0-15, to pump rand() */
+//  srand(atoi(timestamp(TZDELTA,4)));	/* init rand() with mmddhhmmss */
+//  while ( npump-- >= 0 ) rand();	/* pre-pump rand() before use */
+//  if ( rand()%adfrequency == 0 ) {	/* once every adfrequency calls */
+//    advertisement(expression,adtemplate); /*wrap expression in advertisement*/
+//    if ( strcasestr(hashexpr,"\\advertisement") == NULL ) /* random ad */
+//      strchange(0,hashexpr,"\\advertisement "); } } /* signal ad in expr */
 /* ---
  * hash the expression for name of cached image file
  * ------------------------------------------------- */
@@ -1508,6 +1526,28 @@ if ( md5hash != NULL ) {		/* md5str() almost surely succeeded*/
     isdepth = 0;			/* no imageinfo in embedded images */
     if ( msgnumber < 1 ) msgnumber = 2;	/* general failure message */
     emitembedded(msgnumber,isquery); }	/* emit message image */
+  /** ---
+   * stdout time
+   * ----------- */
+  if ( write_stdout ) {
+    // just copying from google really
+    FILE *img = fopen(makepath(NULL,md5hash,extensions[imagetype]),"rb");
+    if (img == NULL) {
+      fprintf(stderr, "write_stdout: failed to open file");
+      exit(1);
+    }
+    fseek(img, 0, SEEK_END);
+    int s = ftell(img);
+    fseek(img, 0, SEEK_SET);
+    // dumb shit ahead.
+    // i don't know why `write(1, img, s)` doesn't write the whole file
+    // to stdout, but here we are.
+    int c;
+    while ((c = fgetc(img)) != EOF)
+      putchar(c);
+    fflush(stdout);
+    fclose(img);
+  }
   /* ---
    * remove images not being cached
    * ------------------------------ */
@@ -1754,27 +1794,33 @@ if ( isdepth )				/* image info requested */
 /* -------------------------------------------------------------------------
 Construct the output path/filename.[gif,png] for the image file
 -------------------------------------------------------------------------- */
-if ( isempty(outfile)			/* using default cache directory */
-||   !isthischar(*outfile,"/\\") ) {	/* or just given a relative path */
-  *giffile = '\000';			/* start with empty string */
-  if ( isworkpath ) {			/* we've cd'ed to a working dir */
-    if ( !isempty(homepath) )		/* have a homepath */
-      strcpy(giffile,homepath);		/* so just use it */
-    else {				/* home path not available */
-      int nsub = (isworkpath?2:1);	/* up two dirs for workdir, else 1 */
-      if ( iserror ) nsub++;		/* and another if in error subdir */
-      if ( (pwdpath=presentwd(nsub))	/* get path nsub dirs up from pwd */
-      != NULL )				/* got it */
-        strcpy(giffile,pwdpath); }	/* use it as giffile prefix */
-    } /* --- end-of-if(isworkpath) --- */
-  if ( isempty(giffile) ) {		/* haven't constructed giffile */
-     if ( iserror ) strcat(giffile,"../"); /*up to temp if in error subdir*/
-     strcat(giffile,"../");		/* up to home or working dir */
-     if ( isworkpath )			/* temp under working dir */
-       strcat(giffile,"../");		/* up from working to home dir */
-    } /* --- end-of-if(isempty(giffile)) --- */
-  gifpathlen = strlen(giffile);		/* #chars in ../ or ../../ prefix */
-  } /* --- end-of-if(isempty(outfile)||etc) --- */
+//if ( !no_cache ) {
+  if ( isempty(outfile)			/* using default cache directory */
+  ||   !isthischar(*outfile,"/\\") ) {	/* or just given a relative path */
+    *giffile = '\000';			/* start with empty string */
+    if ( isworkpath ) {			/* we've cd'ed to a working dir */
+      if ( !isempty(homepath) )		/* have a homepath */
+        strcpy(giffile,homepath);		/* so just use it */
+      else {				/* home path not available */
+        int nsub = (isworkpath?2:1);	/* up two dirs for workdir, else 1 */
+        if ( iserror ) nsub++;		/* and another if in error subdir */
+        if ( (pwdpath=presentwd(nsub))	/* get path nsub dirs up from pwd */
+        != NULL )				/* got it */
+          strcpy(giffile,pwdpath); }	/* use it as giffile prefix */
+      } /* --- end-of-if(isworkpath) --- */
+    if ( isempty(giffile) && !no_cache ) {		/* haven't constructed giffile */
+       if ( iserror ) strcat(giffile,"../"); /*up to temp if in error subdir*/
+       strcat(giffile,"../");		/* up to home or working dir */
+       if ( isworkpath )			/* temp under working dir */
+         strcat(giffile,"../");		/* up from working to home dir */
+      } /* --- end-of-if(isempty(giffile)) --- */
+    gifpathlen = strlen(giffile);		/* #chars in ../ or ../../ prefix */
+    } /* --- end-of-if(isempty(outfile)||etc) --- */
+//} else {
+  // hack: direct giffile to /tmp if no_cache is set 
+  //strcat(giffile,"/tmp/mathtex/");
+  //gifpathlen = strlen(giffile);
+//}
 if ( isempty(outfile) )			/* using default output filename */
   strcat(giffile,makepath(NULL,filename,extensions[imagetype]));
 else					/* have an explicit output file */
@@ -2431,8 +2477,14 @@ construct filename
 /* --- start with caller's path/ or default path to cache directory --- */
 *namebuff = '\000';			/* re-init namebuff */
 if ( path == NULL ) {			/* use default path to cache */
-  if ( !isempty(cachepath) )		/* have a cache path */
-    strcpy(namebuff,cachepath); }	/* begin filename with path */
+  if ( !isempty(cachepath) ) {		/* have a cache path */
+    if (!no_cache) {
+      strcpy(namebuff,cachepath); 
+    } else {
+      strcpy(namebuff,"/tmp/mathtex/");
+    }
+  }
+}	/* begin filename with path */
 else					/* or use caller's supplied path */
   if ( *path != '\000' )		/* if it's not an empty string */
     strcpy(namebuff,path);		/* begin filename with path */
