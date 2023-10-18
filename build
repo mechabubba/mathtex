@@ -1,11 +1,39 @@
-#!/bin/sh
+#!/usr/bin/env bash
+echo_info() { echo -e "\e[1;32m[INFO]\e[0m $*"; }
+echo_warn() { echo -e "\e[1;33m[WARN]\e[0m $*"; }
+
+while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
+    case $1 in
+        -q | --quiet)
+            QUIET=1;
+            ;;
+        -o | --output)
+            OUTPUT=1;
+            if [[ -z "$2" || "$2" =~ ^- ]]; then
+                [[ $QUIET ]] || echo_warn "Output not defined. Exiting...";
+                exit 1; 
+            fi
+            OUTPUT_FILE="$2";
+            shift;
+            ;;
+        -g | --debug-symbols)
+            SYMBOLS=1;
+            ;;
+    esac;
+    shift;
+done;
+if [[ $1 == '--' ]]; then shift; fi;
+
 LATEX="$(which latex)";
 DVIPNG="$(which dvipng)";
 
 if [ -z "$LATEX" ] || [ -z "$DVIPNG" ]; then
-    echo "latex or dvipng missing. exiting...";
+    [[ $QUIET ]] || echo_warn "Latex or dvipng missing or not on path. Exiting...";
     exit 1;
 fi
 
-cc -DLATEX=\"$LATEX\" -DDVIPNG=\"$DVIPNG\" mathtex.c -o mathtex
-
+cc -DLATEX=\"$LATEX\" -DDVIPNG=\"$DVIPNG\" \
+    mathtex.c \
+    md5.c \
+-o $([ $OUTPUT ] && echo "$OUTPUT_FILE" || echo "mathtex") -lm $([ $SYMBOLS ] && echo "-g");
+[[ $QUIET ]] || echo_info "Finished. :)";
