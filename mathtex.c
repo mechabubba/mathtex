@@ -86,47 +86,6 @@
 
 #include "mathtex.h"
 
-/* ==========================================================================
- * Function:	main ( argc, argv )
- * Purpose:	driver for mathtex.c
- *		emits, usually to stdout, a gif or png image
- *		of a LaTeX math expression entered either as
- *		    (1)	html query string from a browser (most typical), or
- *		    (2)	a query string from an html <form method="get">
- *			whose <textarea name=TEXTAREANAME>
- *			(usually for demo), or
- *		    (3)	command-line arguments (usually just to test).
- *		If no input supplied, expression defaults to "f(x)=x^2",
- *		treated as test (input method 3).
- * --------------------------------------------------------------------------
- * Command-Line Arguments:
- *		When running mathTeX from the command-line, rather than
- *		from a browser (usually just for testing), syntax is
- *		     ./mathtex	[-m msglevel]	verbosity of debugging output
- *				[-c cachepath ]	name of cache directory
- *				[expression	expression, e.g., x^2+y^2,
- *		-m   0-99, controls verbosity level for debugging output
- *		     >=9 retains all directories and files created
- *		-c   cachepath specifies relative path to cache directory
- *    -n   override cache to save to /tmp/mathtex/
- *    -s   write result to stdout
- * --------------------------------------------------------------------------
- * Exits:	0=success (always exits 0, regardless of success/failure)
- * --------------------------------------------------------------------------
- * Notes:     o For an executable that emits gif images
- *		     cc mathtex.c -o mathtex.cgi
- *		or, alternatively, for an executable that emits png images
- *		     cc -DPNG mathtex.c -o mathtex.cgi
- *		See Notes at top of file for other compile-line -D options.
- *	      o	Move executable to your cgi-bin directory and either
- *		point your browser to it directly in the form
- *		     http://www.yourdomain.com/cgi-bin/mathtex.cgi?f(x)=x^2
- *		or put a tag in your html document of the form
- *		     <img src="/cgi-bin/mathtex.cgi?f(x)=x^2"
- *		       border=0 align=middle>
- *		where f(x)=x^2 (or any other expression) will be displayed
- *		either as a gif or png image (as per -DIMAGETYPE flag).
- * ======================================================================= */
 int main(int argc, char *argv[]) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -138,69 +97,21 @@ int main(int argc, char *argv[]) {
     int isquery = 0;                                /* true if input from QUERY_STRING */
 
     /* --- preprocess expression for special mathTeX directives, etc --- */
-    char *mathprep();   /* preprocess expression */
-    int unescape_url(); /* convert %20 to blank space, etc */
-    int strreplace();   /* look for keywords in expression */
     int irep = 0;
-    char *strchange();    /* edit expression */
-    char *getdirective(); /*look for \density,\usepackage,etc*/
     char argstring[256];
     char *pdirective = NULL; /* ptr to char after \directive */
-    int validate();          /* remove \input, etc */
-    int crc16();
-    int evalterm(); /* preprocess \eval{expression} */
-    char *nomath(); /* remove math chars from string */
-    int isnumeric();
 
     /* --- other initialization variables --- */
-    char *whichpath();                            /* look for latex,dvipng,etc */
-    int setpaths();                               /* set paths to latex,dvipng,etc */
-    int isstrstr();                               /* find any snippet in string */
-    int isdexists();                              /* check whether cache dir exists */
     int perm_all = (S_IRWXU | S_IRWXG | S_IRWXO); /* 777 permissions */
-    int readcachefile(), nbytes = 0;              /*read expr for -f command-line arg*/
-    int timelimit();                              /* just to check stub or built-in */
-    int iscolorpackage = 0;                       /* true if \usepackage{color} found*/
-    int iseepicpackage = 0;                       /* true if \usepackage{eepic} found*/
-    int ispict2epackage = 0;                      /* true if \usepackage{pict2e}found*/
-    int ispreviewpackage = 0;                     /* true if \usepackage{preview} */
-
-    /* --- image rendering --- */
-    int mathtex(); /* generate new image using LaTeX */
+    int nbytes = 0;
+    int iscolorpackage = 0;   /* true if \usepackage{color} found*/
+    int iseepicpackage = 0;   /* true if \usepackage{eepic} found*/
+    int ispict2epackage = 0;  /* true if \usepackage{pict2e}found*/
+    int ispreviewpackage = 0; /* true if \usepackage{preview} */
 
     /* --- image caching --- */
-    char *makepath(); /* construct full path/filename.ext*/
-    char *md5str();
     char *md5hash = NULL; /* md5 has of expression */
-    char *presentwd();
     char *pwdpath = NULL; /* home pwd for relative file paths */
-
-    char *about = "mathTeX v" VERSION ", Copyright(c) " COPYRIGHTDATE
-                  ", John Forkosh Associates, Inc\n"
-                  "Modified by mechabubba @ https://github.com/mechabubba/mathtex.          \n";
-    char *usage =
-        "\n"
-        "Usage: mathtex [options] [expression]                                    \n"
-        "\n"
-        "  -c [cache]         the image cache folder. defaults to `./cache/`.     \n"
-        "                     set this to \"none\" to deliberately disable caching\n"
-        "                     of the rendered image                               \n"
-        "  -f [input_file]    file to read latex expression in from               \n"
-        "  -h                 prints this                                         \n"
-        "  -m [log_verbosity] verbosity (\"message level\") of logs               \n"
-        "  -o [output_file]   file to write output image from                     \n"
-        "  -s                 writes output image to stdout (use `-m 0`!)         \n"
-        "  -t                 overrides cache to store images in /tmp/mathtex     \n"
-        "                     (shorthand for `-c /tmp/mathtex`)                   \n"
-        "  -w                 keeps work directory. exists for debug reasons      \n"
-        "\n"
-        "Example: `mathtex -o equation1 \"f(x,y)=x^2+y^2\"`                       \n";
-    char *license =
-        "\n"
-        "This program is free software licensed under the terms of the GNU General\n"
-        "Public License, and comes with absolutely no warranty whatsoever. Please \n"
-        "see https://github.com/mechabubba/mathtex/blob/master/COPYING for        \n"
-        "complete details.\n";
 
     char whichtemplate[512] = /* mathTeX which "adtemplate" */
         "\\begin{center}\n"
@@ -227,11 +138,24 @@ int main(int argc, char *argv[]) {
         fprintf(msgfp, "%s%s%s", about, usage, license);
         exit(0);
     } else {
-        while ((c = getopt(argc, argv, ":c:f:hm:no:stw")) != -1) {
+        while ((c = getopt(argc, argv, ":c:d:f:hm:no:stw")) != -1) {
             switch (c) {
                 case 'c': // cache w/ location
                     strcpy(cachepath, optarg);
                     if (strlen(cachepath) < 1 || strcmp(cachepath, "none") == 0) iscaching = 0; // disable caching if path is an empty string or keyword "none"
+                    break;
+                case 'd': // dpi
+                    if (isnumeric(optarg)) {
+                        int val = atoi(optarg);
+                        if (val < 0) {
+                            log_info(1, "Negative DPI provided - ignoring.");
+                        } else {
+                            strcpy(density, optarg);
+                        }
+                    } else {
+                        log_error("Operand to option -%c must be an integer.\n", c);
+                        iserror++;
+                    }
                     break;
                 case 'f': // input file
                     nbytes = readcachefile(optarg, (unsigned char *)exprbuffer);
@@ -250,7 +174,7 @@ int main(int argc, char *argv[]) {
                     if (isnumeric(optarg)) {
                         msglevel = atoi(optarg);
                     } else {
-                        fprintf(stderr, "Operand to option -%c must be an integer.\n", c);
+                        log_error("Operand to option -%c must be an integer.\n", c);
                         iserror++;
                     }
                     break;
@@ -292,6 +216,7 @@ int main(int argc, char *argv[]) {
         }
         strcpy(exprbuffer, argv[optind]);
     }
+    log_info(1, "%s%s\n", about, license);
 
     /* ---
      * pre-process expression
@@ -339,28 +264,28 @@ int main(int argc, char *argv[]) {
         sprintf(expression + strlen(expression), "-DCONVERT=$\\backslash$\"%s$\\backslash$\" \\ (%s)\\\\ \n", convertpath,
                 pathsource[isconvertpath]); // convert path
         strcat(expression, "}");            /* end of \fparbox{} */
-    } else {                                /* no \switches in expression */
-        /* ---
-         * check for \environment directive (which supercedes everything else)
-         * ------------------------------------------------------------------- */
-        if (strreplace(expression, "\\environment", "", 0, 0)                                                       /* remove \environment */
-            >= 1) {                                                                                                 /* found \environment */
-            int ienv = 0;                                                                                           /* environ[] index */
-            /*iscaching = 0;*/                                                                                      /* don't cache \environment image */
-            *expression = '\000';                                                                                   /* reset expression */
-            setpaths(10 * latexmethod + imagemethod);                                                               /* set paths */
-            strcat(expression, "\\parstyle");                                                                       /* set paragraph mode */
-            strcat(expression, "\\scriptsize\\tt");                                                                 /* set font,size */
-            strcat(expression, "\\noindent");                                                                       /* don't indent first line */
-            strcat(expression, "\\begin{verbatim}");                                                                /* begin verbatim environment */
-            for (ienv = 0;; ienv++) {                                                                               /* loop over environ[] strings */
-                if (environ[ienv] == (char *)NULL) break;                                                           /* null terminates list */
-                if (*(environ[ienv]) == '\000') break;                                                              /* double-check empty string */
-                sprintf(expression + strlen(expression), "  %2d. %s \n", ienv + 1, strwrap(environ[ienv], 50, -6)); /* display environment string */
-                /* "%2d.\\ \\ %s\\ \\\\ \n", ienv+1,nomath(environ[ienv])); */
-            }
-            strcat(expression, "\\end{verbatim}"); /* end verbatim environment */
+    }
+
+    /* ---
+     * check for \environment directive (which supercedes everything else)
+     * ------------------------------------------------------------------- */
+    if (strreplace(expression, "\\environment", "", 0, 0)                                                       /* remove \environment */
+        >= 1) {                                                                                                 /* found \environment */
+        int ienv = 0;                                                                                           /* environ[] index */
+        /*iscaching = 0;*/                                                                                      /* don't cache \environment image */
+        *expression = '\000';                                                                                   /* reset expression */
+        setpaths(10 * latexmethod + imagemethod);                                                               /* set paths */
+        strcat(expression, "\\parstyle");                                                                       /* set paragraph mode */
+        strcat(expression, "\\scriptsize\\tt");                                                                 /* set font,size */
+        strcat(expression, "\\noindent");                                                                       /* don't indent first line */
+        strcat(expression, "\\begin{verbatim}");                                                                /* begin verbatim environment */
+        for (ienv = 0;; ienv++) {                                                                               /* loop over environ[] strings */
+            if (environ[ienv] == (char *)NULL) break;                                                           /* null terminates list */
+            if (*(environ[ienv]) == '\000') break;                                                              /* double-check empty string */
+            sprintf(expression + strlen(expression), "  %2d. %s \n", ienv + 1, strwrap(environ[ienv], 50, -6)); /* display environment string */
+            /* "%2d.\\ \\ %s\\ \\\\ \n", ienv+1,nomath(environ[ienv])); */
         }
+        strcat(expression, "\\end{verbatim}"); /* end verbatim environment */
     }
 
     /* ---
@@ -429,6 +354,27 @@ int main(int argc, char *argv[]) {
     if (strstr(expression, "gather") != NULL) mathmode = 2;   /* gather environment used, need paragraph style for gather */
     if (strstr(expression, "eqnarray") != NULL) mathmode = 2; /* eqnarray environment used, need paragraph style for eqnarray */
 
+    // shift around any nefarious preamble stuff
+    // specifically: \documentclass and \begin{document}
+    // doing this allows more compatibility with user pasted latex layouts
+    if (getdirective(expression, "\\documentclass", 1, 0, 1, dclassargs) != NULL) {
+        // printf("\n%d\n", noptional);
+        if (noptional >= 1) {
+            dclassoptions = optionalargs[0];
+            dclass = dclassargs[0];
+        } else {
+            dclass = dclassargs[0];
+        }
+        // printf("dclassoptions: %s\n", dclassoptions);
+        // printf("dclass:        %s\n\n", dclass);
+    }
+    strreplace(latexwrapper, "%%dclassoptions%%", dclassoptions, 0, 0);
+    strreplace(latexwrapper, "%%dclass%%", dclass, 0, 0);
+
+    // @todo maybe overaggressive
+    strreplace(expression, "\\begin{document}", "", 0, 0);
+    strreplace(expression, "\\end{document}", "", 0, 0);
+
     /* --- check for explicit displaystyle/textstyle/parstyle directives --- */
     if (strreplace(expression, "\\displaystyle", "", 0, 0) >= 1) mathmode = 0; /*remove \displaystyle, set displaystyle flag */
     if (strreplace(expression, "\\textstyle", "", 0, 0) >= 1) mathmode = 1;    /* remove \textstyle, set textstyle flag */
@@ -464,13 +410,13 @@ int main(int argc, char *argv[]) {
 
     /* --- check for \depth or \nodepth directive --- */
     if (strreplace(expression, "\\depth", "", 0, 0) >= 1) { /* \depth requested and found depth */
-        if (1) {                                            /* guard */
-                                                            /* ---
-                                                             * note: curl_init() stops at the first whitespace char in $url argument,
-                                                             * so php functions using \depth replace blanks with tildes
-                                                             * ----------------------------------------------------------------------
-                                                             */
-            /*int ntilde = 0;*/                             /* # ~ chars replaced */
+        if (1) {
+            /* ---
+             * note: curl_init() stops at the first whitespace char in $url argument,
+             * so php functions using \depth replace blanks with tildes
+             * ----------------------------------------------------------------------
+             */
+            // int ntilde = 0;                             /* # ~ chars replaced */
             /*ntilde =*/strreplace(expression, "~", " ", 0, 0);
         }
         isdepth = 1; /* so reset flag */
@@ -490,6 +436,7 @@ int main(int argc, char *argv[]) {
             if (noptional > 0) {             /* but we found an optional arg */
                 strninit(packargs[npackages], optionalargs[0], 127);
             } /*copy the first*/
+
             /* --- check for particular packages --- */
             if (strstr(packages[npackages], "color") != NULL) iscolorpackage = 1;     /* set color package flag*/
             if (strstr(packages[npackages], "eepic") != NULL) iseepicpackage = 1;     /* set eepic package flag */
@@ -582,12 +529,12 @@ int main(int argc, char *argv[]) {
     md5hash = md5str(hashexpr);
 
     /* ---
-     * emit initial messages
+     * emit informational messages
      * --------------------- */
-    log_info(1, "%s%s\n", about, license);
     log_info(5, "[main] running image: %s\n", argv[0]);
     log_info(5, "[main] home directory: %s\n", homepath);
-    log_info(5, "[main] input expression: %s\n", hashexpr);
+    log_info(20, "[main] input expression: %s\n", hashexpr);
+    log_info(5, "[main] === processed expression ===\n\n%s\n\n", expression);
     log_info(10, "[main] %s timelimit info: warn/killtime=%d/%d, path=%s\n", (timelimit("", -99) == 992 ? "Built-in" : "Stub"), warntime, killtime,
              (istimelimitpath ? timelimitpath : "none"));
 
@@ -619,10 +566,31 @@ int main(int argc, char *argv[]) {
         if (mathtex(expression, md5hash) != imagetype) {
             // shits fucked. throw error message and abandon ship
             // isdepth = 0; /* no imageinfo in embedded images */
-            if (msgnumber < 1) msgnumber = 2; /* if nothing specific, emit general error message */
+            if (msgnumber < 1) {
+                // if nothing specific, emit general error message.
+                msgnumber = 2;
+            } else if (msgnumber == LATEXFAILED) {
+                // if the latex command failed, search for an answer.
+                char filename[96];
+                sprintf(filename, "%s/latex.log", md5hash);
+                char *path = makepath(NULL, filename, NULL);
+                if (isfexists(path)) {
+                    char errors[LATEXERRORCOUNT][1024];
+                    int status = checkerrors(path, errors);
+                    if (status != -1) {
+                        for (int i = 0; i < status; i++) { log_error(errors[i]); }
+                    } else if (status == 0) {
+                        log_error("No errors found in log. (How did we get here?)\n");
+                    }
+                }
+            }
             log_error(embeddedtext[msgnumber]);
             goto end_of_job;
         }
+
+        /**
+         * remove temp dir
+         */
 
         /** ---
          * emit generated image to stdout
@@ -659,22 +627,6 @@ end_of_job:
     exit(0);
 }
 
-/* ==========================================================================
- * Function:	mathtex ( expression, filename )
- * Purpose:	create image of latex math expression
- * --------------------------------------------------------------------------
- * Arguments:	expression (I)	pointer to null-terminated char string
- *				containing latex math expression
- *		filename (I)	pointer to null-terminated char string
- *				containing filename but not .extension
- *				of output file (should be the md5 hash
- *				of expression)
- * --------------------------------------------------------------------------
- * Returns:	( int )		imagetype if successful, 0=error
- * --------------------------------------------------------------------------
- * Notes:     o	created file will be filename.gif if imagetype=1
- *		or filename.png if imagetype=2.
- * ======================================================================= */
 int mathtex(char *expression, char *filename) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -694,8 +646,6 @@ int mathtex(char *expression, char *filename) {
 
     /* --- other variables --- */
     static int iserror = 0; /* true if procesing error message */
-    int setpaths();         /* set paths for latex,dvipng,etc */
-    char *makepath();       /* path/filename.ext */
     char latexfile[256];
     char giffile[256] = "\000";
     FILE *latexfp = NULL;                 /*latex wrapper file for expression*/
@@ -705,18 +655,11 @@ int mathtex(char *expression, char *filename) {
     int perm_all = (S_IRWXU | S_IRWXG | S_IRWXO); /* 777 permissions */
     int dir_stat = 0;                             /* 1=mkdir okay, 2=chdir okay */
     int sys_stat = 0;                             /* system() return status */
-    int isdexists();                              /* check if dir, .dvi file created */
-    int isfexists();
-    // int isnotfound();                             /* check .err file for "not found" */
-    char *presentwd(); /* pwd for file paths */
     char *pwdpath = NULL;
     int isworkpath = 0; /* true if cd'ed to working dir */
-    int strreplace();   /* replace template directives */
     int ipackage = 0;   /* packages[] index 0...npackages-1*/
-    int rrmdir();       /* rm -r */
     int gifpathlen = 0; /* ../ or ../../ prefix of giffile */
     int status = 0;     /* imagetype or 0=error */
-    int timelimit();    /* and using built-in timelimit() */
 
     /* -------------------------------------------------------------------------
     Make temporary work directory and cd to ~workpath/tempdir/
@@ -1073,32 +1016,15 @@ end_of_job:
     return status;
 }
 
-/* ==========================================================================
- * Function:	setpaths ( method )
- * Purpose:	try to set accurate paths for
- *		latex,pdflatex,timelimit,dvipng,dvips,convert
- * --------------------------------------------------------------------------
- * Arguments:	method (I)	10*ltxmethod + imgmethod where
- *				ltxmethod =
- *				   1 for latex, 2 for pdflatex,
- *				   0 for both
- *				imgmethod =
- *				   1 for dvipng, 2 for dvips/convert,
- *				   0 for both
- * --------------------------------------------------------------------------
- * Returns:	( int )		1
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int setpaths(int method) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
     -------------------------------------------------------------------------- */
-    char *programpath = NULL, *whichpath(); /* look for latex,dvipng,etc */
-    int nlocate = 0;                        /*if which fails, #locate|grep hits*/
-    int ltxmethod = method / 10;            /* divide by 10 */
-    int imgmethod = method % 10;            /* remainder after division by 10 */
-    static int islatexwhich = 0;            /* set true after we try whichpath() for that program */
+    char *programpath = NULL;    /* look for latex,dvipng,etc */
+    int nlocate = 0;             /*if which fails, #locate|grep hits*/
+    int ltxmethod = method / 10; /* divide by 10 */
+    int imgmethod = method % 10; /* remainder after division by 10 */
+    static int islatexwhich = 0; /* set true after we try whichpath() for that program */
     static int ispdflatexwhich = 0;
     static int isdvipngwhich = 0;
     static int isdvipswhich = 0;
@@ -1233,32 +1159,77 @@ end_of_job:
     return 1;
 }
 
-/* ==========================================================================
- * Function:	isnotfound ( filename )
- * Purpose:	check a  "... 2>filename.err" file for a "not found" message,
- *		indicating the corresponding program path is incorrect
- * --------------------------------------------------------------------------
- * Arguments:	filename (I)	pointer to null-terminated char string
- *				containing filename (an .err extension
- *				is tacked on, just pass the filename)
- *				to be checked for "not found" message
- * --------------------------------------------------------------------------
- * Returns:	( int )		1 if filename.err contains "not found",
- *				0 otherwise (or for any error)
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
+int checkerrors(char *filename, char **errors) {
+    int current_error = 0;
+    regex_t preg;
+    FILE *fp = fopen(filename, "r");
+    if (fp == NULL) { goto set_error_code; }
+
+    if ((regcomp(&preg, "^[\\s](! .*)", (REG_ICASE | REG_EXTENDED))) != 0) {
+        // shits fucked
+        goto set_error_code;
+    }
+
+    size_t len = 0;
+    ssize_t read;
+    char *line = NULL;
+    char buffer[LATEXSTACKLENGTH];
+    int iserror = 0;
+    while ((read = getline(&line, &len, fp)) != -1) {
+        if (iserror) {
+            if (line[0] == '?') {
+                // lines starting with '?' indicate the end of the stack trace
+                // the issue is that some traces continue immediately without a newline delimiter
+                // so, set the beginning to a ' ' and continue forward. the regex expression can handle it.
+                line[0] = ' ';
+                iserror = 0;
+                errors[current_error] = buffer;
+                &buffer = calloc(LATEXSTACKLENGTH, sizeof(char));
+                current_error++;
+            } else {
+                strcat(errors[current_error], line);
+            }
+        }
+        if (!iserror) {
+            regmatch_t group; // regmatch_t groups[5];
+            int result = regexec(&preg, line, 1, &group, 0);
+            if (!result) {
+                if (!isstrstr(line, "! LaTeX Error:", 0)) {
+                    iserror = 1; // necessary flag to print entire stack trace
+                } else {
+                    current_error++;
+                }
+                strcat(errors[current_error], line);
+            } else if (result != REG_NOMATCH) { // no matches
+                log_error("An unknown error occured whilst searching for errors in the LaTeX log.\n");
+                goto set_error_code;
+            }
+        }
+
+        if (current_error == LATEXERRORCOUNT) { break; }
+    }
+
+end_of_job:
+    fclose(fp);
+    // if (buffer) free(buffer);
+    if (&preg) regfree(&preg);
+    return current_error;
+
+set_error_code:
+    // goto statements are evil but this program is ridden with em so if you cant beat em join em
+    current_error = -1;
+    goto end_of_job;
+}
+
 // ! NOT CURRENTLY IN USE, MAY BE USEFUL LATER... KEEPING IT AROUND !
 // int isnotfound(char *filename) {
 //    /* -------------------------------------------------------------------------
 //    Allocations and Declarations
 //    -------------------------------------------------------------------------- */
 //    int status = 0;       /* set 1 if "not found" found */
-//    int isfexists();      /* check if filename exists */
 //    char command[256];    /* grep program */
 //    FILE *grepout = NULL; /* grep's stdout */
 //    char grepline[256];   /* line from grep's stdout */
-//    int strreplace();     /* make sure "not found" was found */
 //    int nlines = 0;       /* #lines read */
 //
 //    /* -------------------------------------------------------------------------
@@ -1294,44 +1265,6 @@ end_of_job:
 //    return status; /*1 if filename contains "not found"*/
 //}
 
-/* ==========================================================================
- * Function:	validate ( expression )
- * Purpose:	remove/replace illegal \commands from expression
- * --------------------------------------------------------------------------
- * Arguments:	expression (I/O) pointer to null-terminated char string
- *				containing latex expression to be validated.
- *				Upon return, invalid \commands have been
- *				removed or replaced
- * --------------------------------------------------------------------------
- * Returns:	( int )		#illegal \commands found (hopefully 0)
- * --------------------------------------------------------------------------
- * Notes:     o	Ignore this note and see the one below it instead...
- *		  This routine is currently "stubbed out",
- *		  i.e., the invalid[] list of invalid \commands is empty.
- *		  Instead, \renewcommand's are embedded in the LaTeX wrapper.
- *		  So the user's -DNEWCOMMAND=\"filename\" can contain
- *		  additional \renewcomand's for any desired validity checks.
- *	      o	Because some \renewcommand's appear to occasionally cause
- *		latex to go into a loop after encountering syntax errors,
- *		I'm now using validate() to disable \input, etc.
- *		For example, the following short document...
- *		  \documentclass[10pt]{article}
- *		  \begin{document}
- *		  \renewcommand{\input}[1]{dummy renewcommand}
- *		  %%\renewcommand{\sqrt}[1]{dummy renewcommand}
- *		  %%\renewcommand{\beta}{dummy renewcommand}
- *		  \[ \left( \begin{array}{cccc} 1 & 0 & 0 &0
- *		  \\ 0 & 1  %%% \end{array}\right)
- *		  \]
- *		  \end{document}
- *		reports a  "! LaTeX Error:"  and then goes into
- *		a loop if you reply q.  But if you comment out the
- *		\renewcommand{\input} and uncomment either or both
- *		of the other \renewcommand's, then latex runs to
- *		completion (with the same syntax error, of course,
- *		but without hanging).
- *
- * ======================================================================= */
 int validate(char *expression) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -1348,7 +1281,7 @@ int validate(char *expression) {
 #if defined(INVALID) /* cc -DINVALID=\"filename\" */
     #include INVALID /* filename with invalid \commands */
 #endif               /* as illustrated below... */
-                    // clang-format off
+                     // clang-format off
         /* actn "command"           #args pos fmt "replacement string" or NULL
          * ---- ------------------- ----- --- --- -------------------------- */
         {  1,   "\\newcommand",     2,    1,  0,  NULL},
@@ -1384,24 +1317,21 @@ int validate(char *expression) {
 	    /*"{\\mbox{~$\\backslash$newcommand\\{#1\\}[#0]\\{#2\\}~not~permitted~}}" },*/
 #endif
         {  0,  NULL,                0,   -1,  0,  NULL}
-                    // clang-format on
+                     // clang-format on
     };
 
     /* --- other variables --- */
-    int ninvalid = 0; /* #invalid =commands found */
-    int ivalid = 0;   /* invalid[ivalid] list index */
-    char *getdirective();
+    int ninvalid = 0;                                                     /* #invalid =commands found */
+    int ivalid = 0;                                                       /* invalid[ivalid] list index */
     char *pcommand = NULL;                                                /* find and remove invalid command */
     static char args[10][512] = {"", "", "", "", "", "", "", "", "", ""}; /*\cmd{arg}'s*/
-    char *pargs[11] = {                                                   /* ptrs to them */
-                       args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], NULL};
+    char *pargs[11] = {
+        args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], NULL /* ptrs to them */
+    };
     char display[2048]; /*displaystring with args*/
     char argstr[256];
     char optstr[1024];
-    char *strchange(); /* place display where command was */
-    int strreplace();  /* replace #1 with args[0], etc */
-    char *nomath();    /* change \ to \\, { to \{, etc */
-    int iarg = 0;      /* args[], optionalargs[] indexes */
+    int iarg = 0; /* args[], optionalargs[] indexes */
     int iopt = 0;
 
     /* -------------------------------------------------------------------------
@@ -1499,23 +1429,6 @@ end_of_job:
     return ninvalid; /* back to caller with #invalid */
 }
 
-/* ==========================================================================
- * Function:	makepath ( path, name, extension )
- * Purpose:	return string containing path/name.extension
- * --------------------------------------------------------------------------
- * Arguments:	path (I)	pointer to null-terminated char string
- *				containing "" path or path/ or NULL to
- *				use cachepath if caching enabled
- *		name (I)	pointer to null-terminated char string
- *				containing filename but not .extension
- *				of output file or NULL
- *		extension (I)	pointer to null-terminated char string
- *				containing extension or NULL
- * --------------------------------------------------------------------------
- * Returns:	( char * )	"cachepath/filename.extension" or NULL=error
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 char *makepath(char *path, char *name, char *extension) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -1571,17 +1484,6 @@ char *makepath(char *path, char *name, char *extension) {
     return filename; /* back with name or NULL=error */
 }
 
-/* ==========================================================================
- * Function:	isfexists ( filename )
- * Purpose:	check whether or not filename exists
- * --------------------------------------------------------------------------
- * Arguments:	filename (I)	pointer to null-terminated char string
- *				containing filename to check for
- * --------------------------------------------------------------------------
- * Returns:	( int )		1 = filename exists, 0 = not
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int isfexists(char *filename) {
     FILE *fp = (isempty(filename) ? NULL : fopen(filename, "r")); /* try to fopen*/
     int status = 0;                                               /* init for non-existant filename */
@@ -1592,17 +1494,6 @@ int isfexists(char *filename) {
     return status; /* tell caller if we found filename*/
 }
 
-/* ==========================================================================
- * Function:	isdexists ( dirname )
- * Purpose:	check whether or not directory exists
- * --------------------------------------------------------------------------
- * Arguments:	dirname (I)	pointer to null-terminated char string
- *				containing directory name to check for
- * --------------------------------------------------------------------------
- * Returns:	( int )		1 = directory exists, 0 = not
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int isdexists(char *dirname) {
     int status = 0;                                /* init for non-existant dirname */
     if (!isempty(dirname)) {                       /* must have directory name */
@@ -1619,22 +1510,6 @@ int isdexists(char *dirname) {
     return status; /* tell caller if we found dirname */
 }
 
-/* ==========================================================================
- * Function:	whichpath ( program, nlocate )
- * Purpose:	determines the path to program with popen("which 'program'")
- * --------------------------------------------------------------------------
- * Arguments:	program (I)	pointer to null-terminated char string
- *				containing program whose path is desired
- *		nlocate (I/0)	addr of int containing NULL to ignore,
- *				or (addr of int containing) 0 to *not*
- *				use locate if which fails.  If non-zero,
- *				use locate if which fails, and return
- *				number of locate lines (if locate succeeds)
- * --------------------------------------------------------------------------
- * Returns:	( char * )	path to program, or NULL for any error
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 char *whichpath(char *program, int *nlocate) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -1645,7 +1520,6 @@ char *whichpath(char *program, int *nlocate) {
     int nchars = 0;                                                 /* read whichout one char at a time*/
     int pathchar;                                                   /* fgetc(whichout) */
     char *path = NULL;                                              /* either pathbuff or NULL=error */
-    char *locatepath();                                             /* try locate if which fails */
     int islocate = (nlocate == NULL ? 1 : (*nlocate != 0 ? 1 : 0)); /* 1=use locate*/
 
     /* -------------------------------------------------------------------------
@@ -1684,19 +1558,6 @@ end_of_job:
     return path; /* give caller path to command */
 }
 
-/* ==========================================================================
- * Function:	locatepath ( program, nlocate )
- * Purpose:	determines the path to program with popen("locate 'program'")
- * --------------------------------------------------------------------------
- * Arguments:	program (I)	pointer to null-terminated char string
- *				containing program whose path is desired
- *		nlocate (O)	addr to int returning #lines locate|grep
- *				found, or NULL to ignore
- * --------------------------------------------------------------------------
- * Returns:	( char * )	path to program, or NULL for any error
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 char *locatepath(char *program, int *nlocate) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -1716,7 +1577,7 @@ char *locatepath(char *program, int *nlocate) {
     /* --- first construct the command --- */
     if (isempty(program)) goto end_of_job; /* no input */
 
-    /*if ( strlen(program) < 2 ) goto end_of_job; */ /* might run forever */
+    // if (strlen(program) < 2) goto end_of_job; /* might run forever */
     sprintf(command, "locate -q -r \"/%s$\" | grep \"bin\"", program);
 
     /* --- use popen() to invoke locate|grep --- */
@@ -1744,17 +1605,6 @@ end_of_job:
     return path; /* give caller path to command */
 }
 
-/* ==========================================================================
- * Function:	presentwd ( int nsub )
- * Purpose:	determines pwd, nsub directories "up"
- * --------------------------------------------------------------------------
- * Arguments:	nsub (I)	int containing #subdirectories "up" to
- *				which path is wanted. 0 for pwd
- * --------------------------------------------------------------------------
- * Returns:	( char * )	path to pwd, or NULL for any error
- * --------------------------------------------------------------------------
- * Notes:     o	A forward / is always the last character
- * ======================================================================= */
 char *presentwd(int nsub) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -1812,20 +1662,6 @@ end_of_job:
     return path; /* give caller path */
 }
 
-/* ==========================================================================
- * Function:	rrmdir ( path )
- * Purpose:	rm -r path
- * --------------------------------------------------------------------------
- * Arguments:	path (I)	pointer to null-terminated char string
- *				containing path to be rm'ed,
- *				relative to cwd.
- * --------------------------------------------------------------------------
- * Returns:	( int )		0 = success, -1 = error
- * --------------------------------------------------------------------------
- * Notes:     o	Based on Program 4.7, pages 108-111, in
- *		Advanced Programming in the UNIX Environment,
- *		W. Richard Stevens, Addison-Wesley 1992, ISBN 0-201-56317-7
- * ======================================================================= */
 int rrmdir(char *path) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -1890,19 +1726,6 @@ end_of_job:
     return status;
 }
 
-/* ==========================================================================
- * Function:	readcachefile ( cachefile, buffer )
- * Purpose:	read cachefile into buffer
- * --------------------------------------------------------------------------
- * Arguments:	cachefile (I)	pointer to null-terminated char string
- *				containing full path to file to be read
- *		buffer (O)	pointer to unsigned char string
- *				returning contents of cachefile
- * --------------------------------------------------------------------------
- * Returns:	( int )		#bytes read (0 signals error)
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int readcachefile(char *cachefile, unsigned char *buffer) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -1946,17 +1769,6 @@ end_of_job:
     return nbytes;                          /* back with #bytes emitted */
 }
 
-/* ==========================================================================
- * Function:	crc16 ( s )
- * Purpose:	16-bit crc of string s
- * --------------------------------------------------------------------------
- * Arguments:	s (I)		pointer to null-terminated char string
- *				whose crc is desired
- * --------------------------------------------------------------------------
- * Returns:	( int )		16-bit crc of s
- * --------------------------------------------------------------------------
- * Notes:     o	From Numerical Recipes in C, 2nd ed, page 900.
- * ======================================================================= */
 int crc16(char *s) {
     /* -------------------------------------------------------------------------
     Compute the crc
@@ -1978,26 +1790,6 @@ int crc16(char *s) {
     return (int)crc; /* back to caller with crc */
 }
 
-/* ==========================================================================
- * Function:	md5str ( instr )
- * Purpose:	returns null-terminated character string containing
- *		md5 hash of instr (input string)
- * --------------------------------------------------------------------------
- * Arguments:	instr (I)	pointer to null-terminated char string
- *				containing input string whose md5 hash
- *				is desired
- * --------------------------------------------------------------------------
- * Returns:	( char * )	ptr to null-terminated 32-character
- *				md5 hash of instr
- * --------------------------------------------------------------------------
- * Notes:     o	Other md5 library functions are included below.
- *		They're all taken from Christophe Devine's code,
- *		which (as of 04-Aug-2004) is available from
- *		     http://www.cr0.net:8040/code/crypto/md5/
- *	      o	The P,F,S macros in the original code are replaced
- *		by four functions P1()...P4() to accommodate a problem
- *		with Compaq's vax/vms C compiler.
- * ======================================================================= */
 char *md5str(char *instr) {
     static char outstr[64];
     unsigned char md5sum[16];
@@ -2011,33 +1803,9 @@ char *md5str(char *instr) {
     return outstr;
 }
 
-/* ==========================================================================
- * Functions:	int  unescape_url ( char *url )
- *		char x2c ( char *what )
- * Purpose:	unescape_url replaces 3-character sequences %xx in url
- *		    with the single character represented by hex xx.
- *		x2c returns the single character represented by hex xx
- *		    passed as a 2-character sequence in what.
- * --------------------------------------------------------------------------
- * Arguments:	url (I)		char * containing null-terminated
- *				string with embedded %xx sequences
- *				to be converted.
- *		what (I)	char * whose first 2 characters are
- *				interpreted as ascii representations
- *				of hex digits.
- * --------------------------------------------------------------------------
- * Returns:	( int )		length of url string after replacements.
- *		( char )	x2c returns the single char
- *				corresponding to hex xx passed in what.
- * --------------------------------------------------------------------------
- * Notes:     o	These two functions were taken from util.c in
- *   ftp://ftp.ncsa.uiuc.edu/Web/httpd/Unix/ncsa_httpd/cgi/ncsa-default.tar.Z
- *	      o	Added ^M,^F,etc, and +'s to blank xlation 0n 01-Oct-06
- * ======================================================================= */
 int unescape_url(char *url) {
     int x = 0;
     int y = 0;
-    char x2c();
     static char *hex = "0123456789ABCDEFabcdef";
     int xlatectrl = 1;
     int xlateblank = 0 /* 1 */;
@@ -2079,26 +1847,6 @@ char x2c(char *what) {
     return digit;
 }
 
-/* ==========================================================================
- * Function:	timelimit ( char *command, int killtime )
- * Purpose:	Issues a system(command) call, but throttles command
- *		after killtime seconds if it hasn't already completed.
- * --------------------------------------------------------------------------
- * Arguments:	command (I)	char * to null-terminated string
- *				containing system(command) to be executed
- *		killtime (I)	int containing maximum #seconds
- *				to allow command to run
- * --------------------------------------------------------------------------
- * Returns:	( int )		return status from command,
- *				or -1 for any error.
- * --------------------------------------------------------------------------
- * Notes:     o	The timelimit() code is adapted from
- *		   http://devel.ringlet.net/sysutils/timelimit/
- *		Compile with -DTIMELIMIT=\"$(which timelimit)\" to use an
- *		installed copy of timelimit rather than this built-in code.
- *	      o if symbol ISCOMPILETIMELIMIT is false, a stub function
- *		that just issues system(command) is compiled instead.
- * ======================================================================= */
 #if !ISCOMPILETIMELIMIT
 int timelimit(char *command, int killtime) {
     if (isempty(command))                    /* no command given */
@@ -2197,42 +1945,6 @@ int setsignal(int sig, void (*handler)(int)) {
 }
 #endif /* ISCOMPILETIMELIMIT */
 
-/* ==========================================================================
- * Function:	getdirective(string, directive, iscase, isvalid, nargs, args)
- * Purpose:	Locates the first \directive{arg1}...{nargs} in string,
- *		returns arg1...nargs in args[],
- *		and removes \directive and its args from string.
- * --------------------------------------------------------------------------
- * Arguments:	string (I/0)	char * to null-terminated string from which
- *				the first occurrence of \directive will be
- *				interpreted and removed
- *		directive (I)	char * to null-terminated string containing
- *				the \directive to be interpreted in string
- *		iscase (I)	int containing 1 if match of \directive
- *				in string should be case-sensitive,
- *				or 0 if match is case-insensitive.
- *		isvalid (I)	int containing validity check option:
- *				0=no checks, 1=must be numeric
- *		nargs (I)	int containing (maximum) number of
- *				{args} following \directive, or 0 if none.
- *		args (O)	void * interpreted as (char *) if nargs=1
- *				to return the one and only arg,
- *				or interpreted as (char **) if nargs>1
- *				to array of returned arg strings
- * --------------------------------------------------------------------------
- * Returns:	( char * )	ptr to first char after removed \directive, or
- *				NULL if \directive not found, or any error.
- * --------------------------------------------------------------------------
- * Notes:     o	If optional [arg]'s are found, they're stored in the global
- *		optionalargs[] buffer, and the noptional counter is bumped.
- *	      o	set global argformat's decimal digits for each arg,
- *		e.g., 1357... means 1 for 1st arg, 3 for 2nd, 5 for 3rd, etc.
- *		0 for an arg is the default format (i.e., argformat=0),
- *		and means it's formatted as a LaTeX {arg} or [arg].
- *		1 for an arg means arg terminated by first non-alpha char
- *		2 means arg terminated by {   (e.g., as for /def)
- *		8 means arg terminated by first whitespace char
- * ======================================================================= */
 char *getdirective(char *string, char *directive, int iscase, int isvalid, int nargs, void *args) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -2246,10 +1958,9 @@ char *getdirective(char *string, char *directive, int iscase, int isvalid, int n
     char argfld[512];     /* {arg} characters */
     int nfmt = 0;         /* {arg} format */
     // int isnegfmt = 0;
-    int argfmt[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};         /* argformat digits */
-    int gotargs = (args == NULL ? 0 : 1);                /* true if args array supplied */
-    int isdalpha = 1;                                    /* true if directive ends with alpha*/
-    char *strpspn(char *s, char *reject, char *segment); /*non-() not in rej*/
+    int argfmt[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}; /* argformat digits */
+    int gotargs = (args == NULL ? 0 : 1);        /* true if args array supplied */
+    int isdalpha = 1;                            /* true if directive ends with alpha*/
 
     /* -------------------------------------------------------------------------
     Find first \directive in string
@@ -2294,7 +2005,7 @@ char *getdirective(char *string, char *directive, int iscase, int isvalid, int n
     Get arguments
     -------------------------------------------------------------------------- */
     iarg = 0;                                                        /* no args yet */
-    if (nargs > 0)                                                   /* \directive has {args} */
+    if (nargs > 0) {                                                 /* \directive has {args} */
         while (iarg < nargs + noptional) {                           /* get each arg */
             int karg = iarg - noptional;                             /* non-optional arg index */
             int kfmt = (nfmt <= karg ? 0 : argfmt[nfmt - karg - 1]); /* arg format digit */
@@ -2390,50 +2101,25 @@ char *getdirective(char *string, char *directive, int iscase, int isvalid, int n
             /* --- completed this arg --- */
             iarg++; /* bump arg count */
         }
+    }
 
 /* -------------------------------------------------------------------------
 Back to caller
 -------------------------------------------------------------------------- */
 end_of_job:
-    if (1) argformat = 0;                  /* always/never reset global arg */
-    if (1) optionalpos = 0;                /* always/never reset global arg */
-    if (pfirst != NULL && plast != NULL) { /* have directive field delims */
-        strsqueeze(pfirst, ((int)(plast - pfirst)));
-    }              /* squeeze out directive */
+    if (1) argformat = 0;                            /* always/never reset global arg */
+    if (1) optionalpos = 0;                          /* always/never reset global arg */
+    if (pfirst != NULL && plast != NULL) {           /* have directive field delims */
+        strsqueeze(pfirst, ((int)(plast - pfirst))); /* squeeze out directive */
+    }
     return pfirst; /* ptr to 1st char after directive */
 }
 
-/* ==========================================================================
- * Function:	mathprep ( expression )
- * Purpose:	preprocessor for mathTeX input, e.g.,
- *		(a) removes leading/trailing $'s from $$expression$$
- *		(b) xlates &html; special chars to equivalent latex
- *		(c) xlates &#nnn; special chars to equivalent latex
- *		Should only be called once (after unescape_url())
- * --------------------------------------------------------------------------
- * Arguments:	expression (I/O) char * to first char of null-terminated
- *				string containing mathTeX/LaTeX expression,
- *				and returning preprocessed string
- * --------------------------------------------------------------------------
- * Returns:	( char * )	ptr to input expression,
- *				or NULL for any parsing error.
- * --------------------------------------------------------------------------
- * Notes:     o	The ten special symbols  $ & % # _ { } ~ ^ \  are reserved
- *		for use in LaTeX commands.  The corresponding directives
- *		\$ \& \% \# \_ \{ \}  display the first seven, respectively,
- *		and \backslash displays \.  It's not clear to me whether
- *		or not mathprep() should substitute the displayed symbols,
- *		e.g., whether &#36; better xlates to \$ or to $.
- *		Right now, it's the latter.
- * ======================================================================= */
 char *mathprep(char *expression) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
     -------------------------------------------------------------------------- */
     int isym = 0, inum = 0;                                      /* symbols[], numbers[] indexes */
-    char *strchange();                                           /* change leading chars of string */
-    char *strwstr();                                             /*use strwstr() instead of strstr()*/
-    int strreplace();                                            /* substitute/from/to/ */
     int ndollars = 0;                                            /* #leading/trailing $$...$$'s */
     int explen = (isempty(expression) ? 0 : strlen(expression)); /*#input chars*/
 
@@ -2699,53 +2385,6 @@ end_of_job:
     return expression;
 }
 
-/* ==========================================================================
- * Function:	strwstr (char *string, char *substr, char *white, int *sublen)
- * Purpose:	Find first substr in string, but wherever substr contains
- *		a whitespace char (in white), string may contain any number
- *		(including 0) of whitespace chars. If white contains I or i,
- *		then match is case-insensitive (and I,i _not_ whitespace).
- * --------------------------------------------------------------------------
- * Arguments:	string (I)	char * to null-terminated string in which
- *				first occurrence of substr will be found
- *		substr (I)	char * to null-terminated string containing
- *				"template" that will be searched for
- *		white (I)	char * to null-terminated string containing
- *				whitespace chars.  If NULL or empty, then
- *				" \t\n\r\f\v" (see #define WHITESPACE) used.
- *				If white contains I or i, then match is
- *				case-insensitive (and I,i _not_ considered
- *				whitespace).
- *		sublen (O)	address of int returning "length" of substr
- *				found in string (which may be longer or
- *				shorter than substr itself).
- * --------------------------------------------------------------------------
- * Returns:	( char * )	ptr to first char of substr in string
- *				or NULL if not found or for any error.
- * --------------------------------------------------------------------------
- * Notes:     o	Wherever a single whitespace char appears in substr,
- *		the corresponding position in string may contain any
- *		number (including 0) of whitespace chars, e.g.,
- *		string="abc   def" and string="abcdef" both match
- *		substr="c d" at offset 2 of string.
- *	      o	If substr="c  d" (two spaces between c and d),
- *		then string must have at least one space, so now "abcdef"
- *		doesn't match.  In general, the minimum number of spaces
- *		in string is the number of spaces in substr minus 1
- *		(so 1 space in substr permits 0 spaces in string).
- *	      o	Embedded spaces are counted in sublen, e.g.,
- *		string="c   d" (three spaces) matches substr="c d"
- *		with sublen=5 returned.  But string="ab   c   d" will
- *		also match substr="  c d" returning sublen=5 and
- *		a ptr to the "c".  That is, the mandatory preceding
- *		space is _not_ counted as part of the match.
- *		But all the embedded space is counted.
- *		(An inconsistent bug/feature is that mandatory
- *		terminating space is counted.)
- *	      o	Moreover, string="c   d" matches substr="  c d", i.e.,
- *		the very beginning of a string is assumed to be preceded
- *		by "virtual blanks".
- * ======================================================================= */
 char *strwstr(char *string, char *substr, char *white, int *sublen) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -2855,28 +2494,6 @@ end_of_job:
     return pfound;          /*ptr to first found substr, or NULL*/
 }
 
-/* ==========================================================================
- * Function:	strreplace ( string, from, to, iscase, nreplace )
- * Purpose:	Changes the first nreplace occurrences of 'from' to 'to'
- *		in string, or all occurrences if nreplace=0.
- * --------------------------------------------------------------------------
- * Arguments:	string (I/0)	char * to null-terminated string in which
- *				occurrence of 'from' will be replaced by 'to'
- *		from (I)	char * to null-terminated string
- *				to be replaced by 'to'
- *		to (I)		char * to null-terminated string that will
- *				replace 'from'
- *		iscase (I)	int containing 1 if matches of 'from'
- *				in 'string' should be case-sensitive,
- *				or 0 if matches are case-insensitive.
- *		nreplace (I)	int containing (maximum) number of
- *				replacements, or 0 to replace all.
- * --------------------------------------------------------------------------
- * Returns:	( int )		number of replacements performed,
- *				or 0 for no replacements or -1 for any error.
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int strreplace(char *string, char *from, char *to, int iscase, int nreplace) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -2886,7 +2503,6 @@ int strreplace(char *string, char *from, char *to, int iscase, int nreplace) {
     int iscommand = (fromlen < 2 ? 0 : (*from == '\\' ? 1 : 0)); /* is from a \command ?*/
     char *pfrom = (char *)NULL;                                  /* ptr to 1st char of from in string*/
     char *pstring = string;                                      /* ptr past previously replaced from*/
-    char *strchange();                                           /* change 'from' to 'to' */
     // int iscase = 1;                                              /* true for case-sensitive match */
     int nreps = 0; /* #replacements returned to caller*/
 
@@ -2923,25 +2539,6 @@ int strreplace(char *string, char *from, char *to, int iscase, int nreplace) {
     return nreps; /* #replacements back to caller */
 }
 
-/* ==========================================================================
- * Function:	strchange ( nfirst, from, to )
- * Purpose:	Changes the nfirst leading chars of `from` to `to`.
- *		For example, to change char x[99]="12345678" to "123ABC5678"
- *		call strchange(1,x+3,"ABC")
- * --------------------------------------------------------------------------
- * Arguments:	nfirst (I)	int containing #leading chars of `from`
- *				that will be replace by `to`
- *		from (I/O)	char * to null-terminated string whose nfirst
- *				leading chars will be replaced by `to`
- *		to (I)		char * to null-terminated string that will
- *				replace the nfirst leading chars of `from`
- * --------------------------------------------------------------------------
- * Returns:	( char * )	ptr to first char of input `from`
- *				or NULL for any error.
- * --------------------------------------------------------------------------
- * Notes:     o	If strlen(to)>nfirst, from must have memory past its null
- *		(i.e., we don't do a realloc)
- * ======================================================================= */
 char *strchange(int nfirst, char *from, char *to) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -2974,26 +2571,6 @@ end_of_job:
     return from; /* changed string back to caller */
 }
 
-/* ==========================================================================
- * Function:	isstrstr ( char *string, char *snippets, int iscase )
- * Purpose:	determine whether any substring of 'string'
- *		matches any of the comma-separated list of 'snippets',
- *		ignoring case if iscase=0.
- * --------------------------------------------------------------------------
- * Arguments:	string (I)	char * containing null-terminated
- *				string that will be searched for
- *				any one of the specified snippets
- *		snippets (I)	char * containing null-terminated,
- *				comma-separated list of snippets
- *				to be searched for in string
- *		iscase (I)	int containing 0 for case-insensitive
- *				comparisons, or 1 for case-sensitive
- * --------------------------------------------------------------------------
- * Returns:	( int )		1 if any snippet is a substring of
- *				string, 0 if not
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int isstrstr(char *string, char *snippets, int iscase) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -3040,27 +2617,11 @@ end_of_job:
     return status; /*1 if snippet found in list, else 0*/
 }
 
-/* ==========================================================================
- * Function:	nomath ( s )
- * Purpose:	Removes/replaces any LaTeX math chars in s
- *		so that s can be rendered in paragraph mode.
- * --------------------------------------------------------------------------
- * Arguments:	s (I)		char * to null-terminated string
- *				whose math chars are to be removed/replaced
- * --------------------------------------------------------------------------
- * Returns:	( char * )	ptr to "cleaned" copy of s
- *				or "" (empty string) for any error.
- * --------------------------------------------------------------------------
- * Notes:     o	The returned pointer addresses a static buffer,
- *		so don't call nomath() again until you're finished
- *		with output from the preceding call.
- * ======================================================================= */
 char *nomath(char *s) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
     -------------------------------------------------------------------------- */
     static char sbuff[4096]; /* copy of s with no math chars */
-    int strreplace();        /* replace _ with -, etc */
 
     /* -------------------------------------------------------------------------
     Make a clean copy of s
@@ -3090,31 +2651,6 @@ end_of_job:
     return sbuff; /* back with clean copy of s */
 }
 
-/* ==========================================================================
- * Function:	strwrap ( s, linelen, tablen )
- * Purpose:	Inserts \n's and spaces in (a copy of) s to wrap lines
- *		at linelen and indent them by tablen.
- * --------------------------------------------------------------------------
- * Arguments:	s (I)		char * to null-terminated string
- *				to be wrapped.
- *		linelen (I)	int containing maximum linelen
- *				between \n's.
- *		tablen (I)	int containing number of spaces to indent
- *				lines.  0=no indent.  Positive means
- *				only indent first line and not others.
- *				Negative means indent all lines except first.
- * --------------------------------------------------------------------------
- * Returns:	( char * )	ptr to "line-wrapped" copy of s
- *				or "" (empty string) for any error.
- * --------------------------------------------------------------------------
- * Notes:     o	The returned copy of s has embedded \n's as necessary
- *		to wrap lines at linelen.  Any \n's in the input copy
- *		are removed first.  If (and only if) the input s contains
- *		a terminating \n then so does the returned copy.
- *	      o	The returned pointer addresses a static buffer,
- *		so don't call strwrap() again until you're finished
- *		with output from the preceding call.
- * ======================================================================= */
 char *strwrap(char *s, int linelen, int tablen) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -3122,8 +2658,6 @@ char *strwrap(char *s, int linelen, int tablen) {
     static char sbuff[4096];                          /* line-wrapped copy of s */
     char *sol = sbuff;                                /* ptr to start of current line*/
     char tab[32] = "                 ";               /* tab string */
-    int strreplace();                                 /* remove \n's */
-    char *strchange();                                /* add \n's and indent space */
     int finalnewline = (lastchar(s) == '\n' ? 1 : 0); /*newline at end of string?*/
     int istab = (tablen > 0 ? 1 : 0);                 /* init true to indent first line */
     int rhslen = 0;                                   /* remaining right hand side length*/
@@ -3182,51 +2716,11 @@ end_of_job:
     return sbuff;                          /* back with clean copy of s */
 }
 
-/* ==========================================================================
- * Function:	strpspn ( char *s, char *reject, char *segment )
- * Purpose:	finds the initial segment of s containing no chars
- *		in reject that are outside (), [] and {} parens, e.g.,
- *		   strpspn("abc(---)def+++","+-",segment) returns
- *		   segment="abc(---)def" and a pointer to the first '+' in s
- *		because the -'s are enclosed in () parens.
- * --------------------------------------------------------------------------
- * Arguments:	s (I)		(char *)pointer to null-terminated string
- *				whose initial segment is desired
- *		reject (I)	(char *)pointer to null-terminated string
- *				containing the "reject chars"
- *				If reject contains a " or a ', then the
- *				" or ' isn't itself a reject char,
- *				but other reject chars within quoted
- *				strings (or substrings of s) are spanned.
- *		segment (O)	(char *)pointer returning null-terminated
- *				string comprising the initial segment of s
- *				that contains non-rejected chars outside
- *				(),[],{} parens, i.e., all the chars up to
- *				but not including the returned pointer.
- *				(That's the entire string if no non-rejected
- *				chars are found.)
- * --------------------------------------------------------------------------
- * Returns:	( char * )	pointer to first reject-char found in s
- *				outside parens, or a pointer to the
- *				terminating '\000' of s if there are
- *				no reject chars in s outside all () parens.
- *				But if reject is empty, returns pointer
- *				to matching )]} outside all parens.
- * --------------------------------------------------------------------------
- * Notes:     o	the return value is _not_ like strcspn()'s
- *	      o	improperly nested (...[...)...] are not detected,
- *		but are considered "balanced" after the ]
- *	      o	if reject not found, segment returns the entire string s
- *	      o	but if reject is empty, returns segment up to and including
- *		matching )]}
- *	      o	leading/trailing whitespace is trimmed from returned segment
- * ======================================================================= */
 char *strpspn(char *s, char *reject, char *segment) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
     -------------------------------------------------------------------------- */
-    char *ps = s;                                    /* current pointer into s */
-    char *strqspn(char *s, char *q, int isunescape); /*span quoted string*/
+    char *ps = s; /* current pointer into s */
     char qreject[256] = "\000";
     char *pq = qreject; /* find "or" in reject */
     char *pr = reject;
@@ -3298,36 +2792,6 @@ end_of_job:
     return ps; /* back to caller */
 }
 
-/* ==========================================================================
- * Function:	strqspn ( char *s, char *q, int isunescape )
- * Purpose:	finds matching/closing " or ' in quoted string
- *		that begins with " or ', and optionally changes
- *		escaped quotes to unescaped quotes.
- * --------------------------------------------------------------------------
- * Arguments:	s (I)		(char *)pointer to null-terminated string
- *				that begins with " or ',
- *		q (O)		(char *)pointer returning null-terminated
- *				quoted token, with or without outer quotes,
- *				and with or without escaped inner quotes
- *				changed to unescaped quotes, depending
- *				on isunescape.
- *		isunescape (I)	int containing 1 to change \" to " if s
- *				is "quoted" or change \' to ' if 'quoted',
- *				or containing 2 to change both \" and \'
- *				to unescaped quotes.  Other \sequences aren't
- *				changed.  Note that \\" emits \".
- *				isunescape=0 makes no changes at all.
- *				Note: the following not implemented yet --
- *				If unescape is negative, its abs() is used,
- *				but outer quotes aren't included in q.
- * --------------------------------------------------------------------------
- * Returns:	( char * )	pointer to matching/closing " or '
- *				(or to char after quote if isunescape<0),
- *				or terminating '\000' if none found,
- *				or unchanged (same as s) if not quoted string
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 char *strqspn(char *s, char *q, int isunescape) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
@@ -3400,18 +2864,6 @@ end_of_job:
     return ps;                   /* return ptr to " or ', or NULL */
 }
 
-/* ==========================================================================
- * Function:	isnumeric ( s )
- * Purpose:	determine if s is an integer
- * --------------------------------------------------------------------------
- * Arguments:	s (I)		(char *)pointer to null-terminated string
- *				that's checked for a leading + or -
- *				followed by digits
- * --------------------------------------------------------------------------
- * Returns:	( int )		1 if s is numeric, 0 if it is not
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int isnumeric(char *s) {
     /* -------------------------------------------------------------------------
     determine whether s is an integer
@@ -3434,36 +2886,13 @@ end_of_job:
     return status; /*back to caller with 1=string, 0=no*/
 }
 
-/* ==========================================================================
- * Function:	evalterm ( STORE *store, char *term )
- * Purpose:	evaluates a term
- * --------------------------------------------------------------------------
- * Arguments:	store (I/O)	STORE * containing environment
- *				in which term is to be evaluated
- *		term (I)	char * containing null-terminated string
- *				with a term like "3" or "a" or "a+3"
- *				whose value is to be determined
- * --------------------------------------------------------------------------
- * Returns:	( int )		value of term,
- *				or NOVALUE for any error
- * --------------------------------------------------------------------------
- * Notes:     o	Also evaluates index?a:b:c:etc, returning a if index<=0,
- *		b if index=1, etc, and the last value if index is too large.
- *		Each a:b:c:etc can be another expression, including another
- *		(index?a:b:c:etc) which must be enclosed in parentheses.
- * ======================================================================= */
 int evalterm(struct store_struct *store, char *term) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations
     -------------------------------------------------------------------------- */
-    int termval = 0;           /* term value returned to caller */
-    char token[2048] = "\000"; /* copy term */
-    char *delim = NULL;        /* delim '(' or '?' in token */
-    // int evalwff();                /* recurse to evaluate terms */
-    // int evalfunc();               /* evaluate function(arg1,arg2,...)*/
-    char *strpspn();              /* span delims */
-    int getstore();               /* lookup variables */
-    int isnumeric();              /* numeric=constant, else variable */
+    int termval = 0;              /* term value returned to caller */
+    char token[2048] = "\000";    /* copy term */
+    char *delim = NULL;           /* delim '(' or '?' in token */
     static int evaltermdepth = 0; /* recursion depth */
     int novalue = -89123456;      /* dummy (for now) error signal */
 
@@ -3565,21 +2994,6 @@ end_of_job:
     return termval;
 }
 
-/* ==========================================================================
- * Function:	getstore ( store, identifier )
- * Purpose:	finds identifier in store and returns corresponding value
- * --------------------------------------------------------------------------
- * Arguments:	store (I)	(STORE *)pointer to store containing
- *				the desired identifier
- *		identifier (I)	(char *)pointer to null-terminated string
- *				containing the identifier whose value
- *				is to be returned
- * --------------------------------------------------------------------------
- * Returns:	( int )		identifier's corresponding value,
- *				or 0 if identifier not found (or any error)
- * --------------------------------------------------------------------------
- * Notes:     o
- * ======================================================================= */
 int getstore(struct store_struct *store, char *identifier) {
     /* -------------------------------------------------------------------------
     Allocations and Declarations

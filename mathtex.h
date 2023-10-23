@@ -32,9 +32,6 @@ Program ID
 /* -------------------------------------------------------------------------
 Standard header files
 -------------------------------------------------------------------------- */
-/* ---
- * standard headers
- * ---------------- */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h> // for getopts
@@ -44,6 +41,9 @@ char *strcasestr(); /* non-standard extension */
 #include <ctype.h>
 #include <time.h>
 extern char **environ; /* for \environment directive */
+
+#include <regex.h>
+
 #include "md5.h"
 
 /* -------------------------------------------------------------------------
@@ -195,9 +195,8 @@ static int mathmode = MATHMODE; /* 0=display 1=text 2=paragraph */
 #if !defined(FONTSIZE)
     #define FONTSIZE 4
 #endif
-static int fontsize = FONTSIZE;  /* 0 = tiny ... 9 = Huge */
-static char *sizedirectives[] = {/* fontsize directives */
-                                 "\\tiny",  "\\scriptsize", "\\footnotesize", "\\small", "\\normalsize", "\\large", "\\Large",
+static int fontsize = FONTSIZE; /* 0 = tiny ... 9 = Huge */
+static char *sizedirectives[] = {"\\tiny",  "\\scriptsize", "\\footnotesize", "\\small", "\\normalsize", "\\large", "\\Large",
                                  "\\LARGE", "\\huge",       "\\Huge",         NULL};
 
 /* ---
@@ -250,6 +249,22 @@ static int isquiet = ISQUIET; /* >99=quiet, 0=-halt-on-error */
     #define ISDEPTH 0
 #endif
 static int isdepth = ISDEPTH; /* true to emit depth */
+
+/* ---
+ * misc.
+ * ----- */
+#if !defined(WRITE_STDOUT)
+    #define WRITE_STDOUT 0 /* print result to stdout */
+#endif
+static int write_stdout = WRITE_STDOUT;
+#if !defined(TMP_CACHE)
+    #define TMP_CACHE 0 /* whether to cache result (defaults cache to /tmp/) */
+#endif
+static int tmp_cache = TMP_CACHE;
+#if !defined(KEEP_WORK)
+    #define KEEP_WORK 0
+#endif
+static int keep_work = KEEP_WORK;
 
 /* ---
  * timelimit -tWARNTIME -TKILLTIME
@@ -311,6 +326,19 @@ static int npackages = 0;     /* number of additional packages */
 static char packages[9][128]; /* additional package names */
 static char packargs[9][128]; /* optional arg for package */
 
+/**
+ * preamble detection
+ */
+static char dclassargs[2][256];
+static char *dclassoptions = "10pt"; // directive options (optional, no pun intended)
+static char *dclass = "article";     // directive class
+
+/**
+ * error detection
+ */
+#define LATEXERRORCOUNT 5     // the amount of errors to detect.
+#define LATEXSTACKLENGTH 1024 // temp until something better comes along
+
 /* ---
  * default uses locatepath() if whichpath() fails
  * ---------------------------------------------- */
@@ -338,13 +366,42 @@ static int msglevel = MSGLEVEL; /* message level for verbose/debug */
 static FILE *msgfp = NULL;      /* output in command-line mode */
 char *strwrap();                /* help format debugging messages */
 
+static char *about = "mathTeX v" VERSION ", Copyright(c) " COPYRIGHTDATE
+                     ", John Forkosh Associates, Inc                                           \n"
+                     "Modified by mechabubba @ https://github.com/mechabubba/mathtex.          \n";
+static char *usage =
+    "\n"
+    "Usage: mathtex [options] [expression]                                    \n"
+    "\n"
+    "  -c [cache]         the image cache folder. defaults to `./cache/`.     \n"
+    "                     set this to \"none\" to deliberately disable caching\n"
+    "                     of the rendered image                               \n"
+    "  -d [dpi]           set dpi of render (default: 120)                    \n"
+    "  -f [input_file]    file to read latex expression in from               \n"
+    "  -h                 prints this                                         \n"
+    "  -m [log_verbosity] verbosity (\"message level\") of logs               \n"
+    "  -o [output_file]   file to write output image from                     \n"
+    "  -s                 writes output image to stdout (use `-m 0`!)         \n"
+    "  -t                 overrides cache to store images in /tmp/mathtex     \n"
+    "                     (shorthand for `-c /tmp/mathtex`)                   \n"
+    "  -w                 keeps work directory. exists for debug reasons      \n"
+    "\n"
+    "Example: `mathtex -o equation1 \"f(x,y)=x^2+y^2\"`                       \n";
+static char *license =
+    "\n"
+    "This program is free software licensed under the terms of the GNU General\n"
+    "Public License, and comes with absolutely no warranty whatsoever. Please \n"
+    "see https://github.com/mechabubba/mathtex/blob/master/COPYING for        \n"
+    "complete details.\n";
+
+/** Logs data of a level to a file pointer. */
 #define log(lvl, fp, ...)         \
     if (msglevel >= (lvl)) {      \
         fprintf(fp, __VA_ARGS__); \
         fflush(fp);               \
     }
-#define log_info(lvl, ...) log(lvl, stdout, __VA_ARGS__)
-#define log_error(...) log(0, stderr, __VA_ARGS__)
+#define log_info(lvl, ...) log(lvl, stdout, __VA_ARGS__) /** Logs informational stuff to stdout. */
+#define log_error(...) log(0, stderr, __VA_ARGS__)       /** Logs errors to stderr. */
 
 static int msgnumber = 0; /* embeddedimages() in query mode */
 #define MAXEMBEDDED 16    /* 1...#embedded images available */
@@ -364,34 +421,28 @@ static int msgnumber = 0; /* embeddedimages() in query mode */
 #define CONVERTFAILED 14  /* msg# if convert failed */
 #define EMITFAILED 15     /* msg# if emitcache() failed */
 #define REMOVEWORKFAILED 16
-static char *embeddedtext[] = {/* text of embedded image messages */
-                               NULL,
-                               "mathTeX test message; program running okay. :)",                                           // 1: mathTeX "okay" test
-                               "mathTeX failed for some reason; probably due to bad paths, permissions, or installation.", // 2: general error message
-                               "Can't mkdir cache directory; check permissions.",                                          // 3: can't create cache dir
-                               "Can't mkdir tempnam/work directory; check permissions.",                                   // 4: can't create work dir
-                               "Can't cd tempnam/work directory; check permissions.",                                      // 5
-                               "Can't fopen(\"latex.tex\") file; check permissions.",                                      // 6
-                               "Can't run latex program; check -DLATEX=\"path\", etc.",                                    // 7
-                               "latex ran, but failed; check your input expression.",                                      // 8
-                               "Can't run dvipng program; check -DDVIPNG=\"path\", etc.",                                  // 9
-                               "dvipng ran, but failed for whatever reason.",                                              // 10
-                               "Can't run dvips program; check -DDVIPS=\"path\", etc.",                                    // 11
-                               "dvips ran, but failed for whatever reason.",                                               // 12
-                               "Can't run convert program; check -DCONVERT=\"path\", etc.",                                // 13
-                               "convert ran, but failed for whatever reason.",                                             // 14
-                               "Can't emit cached image; check permissions.",                                              // 15
-                               "Can't rm -r tempnam/work directory (or some content within it); check permissions.",       // 16
+
+/** Embedded messages for errors. */
+static char *embeddedtext[] = {NULL,
+                               "mathTeX test message; program running okay. :)\n",                                           // 1: mathTeX "okay" test
+                               "mathTeX failed for some reason; probably due to bad paths, permissions, or installation.\n", // 2: general error message
+                               "Can't mkdir cache directory; check permissions.\n",                                          // 3: can't create cache dir
+                               "Can't mkdir tempnam/work directory; check permissions.\n",                                   // 4: can't create work dir
+                               "Can't cd tempnam/work directory; check permissions.\n",                                      // 5
+                               "Can't fopen(\"latex.tex\") file; check permissions.\n",                                      // 6
+                               "Can't run latex program; check -DLATEX=\"path\", etc.\n",                                    // 7
+                               "latex ran, but failed; check your input expression.\n",                                      // 8
+                               "Can't run dvipng program; check -DDVIPNG=\"path\", etc.\n",                                  // 9
+                               "dvipng ran, but failed for whatever reason.\n",                                              // 10
+                               "Can't run dvips program; check -DDVIPS=\"path\", etc.\n",                                    // 11
+                               "dvips ran, but failed for whatever reason.\n",                                               // 12
+                               "Can't run convert program; check -DCONVERT=\"path\", etc.\n",                                // 13
+                               "convert ran, but failed for whatever reason.\n",                                             // 14
+                               "Can't emit cached image; check permissions.\n",                                              // 15
+                               "Can't rm -r tempnam/work directory (or some content within it); check permissions.\n",       // 16
                                NULL};
 
-/* ---
- * output file (from shell mode)
- * ----------------------------- */
 static char outfile[256] = "\000"; /* output file, or empty for default*/
-
-/* ---
- * temporary work directory
- * ------------------------ */
 static char tempdir[256] = "\000"; /* temporary work directory */
 
 /* ---
@@ -405,26 +456,10 @@ static char tempdir[256] = "\000"; /* temporary work directory */
 #endif
 
 /* ---
- * misc.
- * ----- */
-#if !defined(WRITE_STDOUT)
-    #define WRITE_STDOUT 0 /* print result to stdout */
-#endif
-static int write_stdout = WRITE_STDOUT;
-#if !defined(TMP_CACHE)
-    #define TMP_CACHE 0 /* whether to cache result (defaults cache to /tmp/) */
-#endif
-static int tmp_cache = TMP_CACHE;
-#if !defined(KEEP_WORK)
-    #define KEEP_WORK 0
-#endif
-static int keep_work = KEEP_WORK;
-
-/* ---
  * latex wrapper document template (default, isdepth=0, without depth)
  * ------------------------------------------------------------------- */
 static char latexdefaultwrapper[MAXEXPRSZ + 16384] =
-    "\\documentclass[10pt]{article}\n" /*[fleqn] omitted*/
+    "\\documentclass[%%dclassoptions%%]{%%dclass%%}\n" /*[fleqn] omitted*/
     "\\usepackage{amsmath}\n"
     "\\usepackage{amsfonts}\n"
     "\\usepackage{amssymb}\n"
@@ -438,7 +473,7 @@ static char latexdefaultwrapper[MAXEXPRSZ + 16384] =
     "\\hbox\\bgroup#1\\egroup}}\n"
     "\\def\\fparbox#1{\\fbox{\\stackboxes{#1}}}\n"
 #endif
-    "%%%\\pagestyle{empty}\n"
+    //"%%%\\pagestyle{empty}\n"
     "%%pagestyle%%\n"
     "%%previewenviron%%\n"
     "\\begin{document}\n"
@@ -587,20 +622,24 @@ static int iswindows = /* 1 if running under Windows, or 0 if not */
 /* -------------------------------------------------------------------------
 application macros
 -------------------------------------------------------------------------- */
-/* --- check if a string is empty --- */
+
+/** Checks if a string is empty. */
 #define isempty(s) ((s) == NULL ? 1 : (*(s) == '\000' ? 1 : 0))
 
-/* --- last char of a string --- */
+/** Gets the last character of a string. */
 #define plastchar(s) (isempty(s) ? NULL : ((s) + (strlen(s) - 1)))
 #define lastchar(s) (isempty(s) ? '\000' : *(plastchar(s)))
 
-/* --- check for thischar in accept --- */
+/** Checks for `thischar` in `accept`. */
 #define isthischar(thischar, accept) ((thischar) != '\000' && !isempty(accept) && strchr((accept), (thischar)) != (char *)NULL)
 
-/* --- skip/find whitespace --- */
-#define WHITESPACE " \t\n\r\f\v" /* skipped whitespace chars */
+#define WHITESPACE " \t\n\r\f\v" /** Default skipped whitespace chars. */
+
+/** Skips whitespace. */
 #define skipwhite(thisstr) \
     if ((thisstr) != NULL) thisstr += strspn(thisstr, WHITESPACE)
+
+/** Finds whitespace. */
 #define findwhite(thisstr)                        \
     while (!isempty(thisstr)) {                   \
         if (isthischar(*(thisstr), WHITESPACE)) { \
@@ -611,14 +650,14 @@ application macros
     }
 // thisstr += strcspn(thisstr, WHITESPACE);
 
-/* --- skip \command (i.e., find char past last char of \command) --- */
+/** Skips \\command's (eg. find char past last char of \\command) */
 #define skipcommand(thisstr)             \
     while (!isempty(thisstr))            \
         if (!isalpha(*(thisstr))) break; \
         else                             \
             (thisstr)++
 
-/* --- strncpy() n bytes and make sure it's null-terminated --- */
+/** strncpy()'s n bytes and makes sure it's null terminated. */
 #define strninit(target, source, n)             \
     if ((target) != NULL && (n) >= 0) {         \
         char *thissource = (source);            \
@@ -629,7 +668,7 @@ application macros
         }                                       \
     }
 
-/* --- strip leading and trailing whitespace --- */
+/** Strips leading and trailing whitespace. */
 #define trimwhite(thisstr)                                                                     \
     if ((thisstr) != NULL) {                                                                   \
         int thislen = strlen(thisstr);                                                         \
@@ -643,7 +682,7 @@ application macros
         if ((thislen = strspn((thisstr), WHITESPACE)) > 0) { strsqueeze((thisstr), thislen); } \
     } else /* user supplies ';' */
 
-/* --- strcpy(s, s + n) using memmove() (also works for negative n) --- */
+/** strcpy(s, s + n) using memmove() (also works for negative n). */
 #define strsqueeze(s, n)                                     \
     if ((n) != 0) {                                          \
         if (!isempty((s))) {                                 \
@@ -656,16 +695,15 @@ application macros
         }                                                    \
     } else
 
-/* --- strsqueeze(s, t) with two pointers --- */
+/** strsqueeze(s, t) with two pointers. */
 #define strsqueezep(s, t)                                          \
     if (!isempty((s)) && !isempty((t))) {                          \
         int sqlen = strlen((s)) - strlen((t));                     \
         if (sqlen > 0 && sqlen <= 999) { strsqueeze((s), sqlen); } \
     } else
 
-/* --- min and max of args --- */
-#define max2(x, y) ((x) > (y) ? (x) : (y)) /* larger of 2 arguments */
-#define min2(x, y) ((x) < (y) ? (x) : (y)) /* smaller of 2 arguments */
+#define max2(x, y) ((x) > (y) ? (x) : (y)) /** Max of 2 args. */
+#define min2(x, y) ((x) < (y) ? (x) : (y)) /** Min of 2 args. */
 
 /* -------------------------------------------------------------------------
 other application global data
@@ -691,3 +729,395 @@ static struct store_struct mathtexstore[MAXSTORE] = {
     //{ "mytestvar", &mytestvar },
     {NULL, NULL} /* end-of-store */
 };
+
+// Function prototypes.
+/**
+ * Driver for mathtex.c. Emits, usually to stdout, a .png or .gif image of a LaTeX math expression entered;
+ *   - ...from a command-line argument
+ *   - ...from a file (via the `-f` argument)
+ *
+ * @param argc[in] The number of string arguments.
+ * @param argv[in] A char* list of arguments.
+ */
+int main(int argc, char *argv[]);
+
+/**
+ * Creates the image of the latex math expression.
+ *
+ * @param expression[in] The expression to evaluate.
+ * @param filename[in] What to name the file. This is typically set to the md5 of the expression.
+ * @return imagetype if successful, 0 if an error occured.
+ */
+int mathtex(char *expression, char *filename);
+
+/**
+ * Tries to set accurate paths for latex, pdflatex, timelimit, dvipng, dvips, and convert.
+ * @todo What the fuck does this function do???
+ *
+ * @param method[in] 10 * ltxmethod + imgmethod, where;
+ *   - ltxmethod = 1 for latex, 2 for pdflatex, 0 for both
+ *   - imgmethod = 1 for dvipng, 2 for dvips/convert, 0 for both
+ * @return 1
+ */
+int setpaths(int method);
+
+int checkerrors(char *filename, char **errors);
+
+/**
+ * Checks a "... 2>filename.err" file for a "not found" message, indicating the corresponding program path is incorrect.
+ *
+ * @todo This is unnecessary when the exit code returns 127 for this case.
+ * @param filename[in] Pointer to string containing filename (an .err extension is tacked on, just pass the filename) to be checked for "not found" message.
+ * @return 1 if filename.err contains "not found", 0 otherwise, or if an error occured.
+ */
+// int isnotfound(char *filename);
+
+/**
+ * Removes/replaces illegal \\commands from expression.
+ *
+ * Implementation notes;
+ * Because some \\renewcommand's appear to occasionally cause latex to go into a loop after encountering syntax errors, I'm now using validate() to disable
+ * \\input, etc.
+ *
+ * For example, the following short document...
+ * \code{.tex}
+ * \documentclass[10pt]{article}
+ * \begin{document}
+ * \renewcommand{\input}[1]{dummy renewcommand}
+ * %%\renewcommand{\sqrt}[1]{dummy renewcommand}
+ * %%\renewcommand{\beta}{dummy renewcommand}
+ * \[ \left( \begin{array}{cccc} 1 & 0 & 0 &0
+ * \\ 0 & 1  %%% \end{array}\right)
+ * \]
+ * \end{document}
+ * \endcode
+ * ...reports a  "! LaTeX Error:"  and then goes into a loop if you reply q.  But if you comment out the \renewcommand{\input} and uncomment either or both of
+ * the other \renewcommand's, then latex runs to completion (with the same syntax error, of course, but without hanging).
+ *
+ * @param expression[in,out] Null-terminated char* containing expression to validate.
+ * @return Number of illegal \\commands found (hopefully 0).
+ */
+int validate(char *expression);
+
+/**
+ * Returns a string containing `path/name.extension`
+ *
+ * @param path[in] Null-terminated char* containing empty string, path, or `NULL` to use cachepath if caching enabled.
+ * @param name[in] Null-terminated char* containing filename without extension.
+ * @param extension[in] Null-terminated char* containing extension or `NULL`.
+ * @return A string containing `path/name.extension`, or `NULL` if an error occured.
+ */
+char *makepath(char *path, char *name, char *extension);
+
+/**
+ * Checks whether or not filename exists.
+ *
+ * @param filename[in] Null-terminated char* containing filename to check for.
+ * @return 1 if it exists, 0 if not.
+ */
+int isfexists(char *filename);
+
+/**
+ * Checks whether or not a directory exists.
+ *
+ * @param dirname[in] Null-terminated char* containing dirname to check for.
+ * @return 1 if it exists, 0 if not.
+ */
+int isdexists(char *dirname);
+
+/**
+ * Determines the path to a program with `popen("which 'program'")`.
+ *
+ * @param program[in] Null-terminated char* containing program whose path is desired.
+ * @param nlocate[in,out] Address of int containing `NULL` to ignore, or (addr of int containing) 0 to *not* use locate if which fails. If non-zero, use locate
+ * if which fails, and return number of locate lines (if locate succeeds).
+ * @return path to program, or NULL if an error occured.
+ */
+char *whichpath(char *program, int *nlocate);
+
+/**
+ * Determines the path to a program with `popen("locate 'program'")`.
+ *
+ * @param program[in] Null-terminated char* containing program whose path is desired.
+ * @param nlocate[out] Address to int returning the number of lines locate or grep found, or `NULL` to ignore.
+ * @return path to program, or NULL if an error occured.
+ */
+char *locatepath(char *program, int *nlocate);
+
+/**
+ * Determines pwd, modified by nsub directories "up" from it.
+ *
+ * Implementation notes;
+ *   - A forward slash is always the last character.
+ *
+ * @param nsub[in] int containing the number of subdirectories "up" to which path is wanted, 0 for pwd.
+ * @return Path to pwd, or `NULL` if an error occured.
+ */
+char *presentwd(int nsub);
+
+/**
+ * `rm -r path`
+ *
+ * Implementation notes;
+ *   - Based on Program 4.7, pages 108-111, in Advanced Programming in the UNIX Environment, W. Richard Stevens, Addison-Wesley 1992, ISBN 0-201-56317-7.
+ *
+ * @param path[in] Null-terminated char* containing path to be removed, relative to cwd.
+ * @return 0 on success, -1 on error.
+ */
+int rrmdir(char *path);
+
+/**
+ * Reads a file into *buffer.
+ *
+ * @param cachefile[in] Null-terminated char* containing full path to file to be read.
+ * @param buffer[out] Unsigned char* to store contents of file in.
+ * @return Number of bytes read, 0 if an error occured.
+ */
+int readcachefile(char *cachefile, unsigned char *buffer);
+
+/**
+ * 16-bit CRC of string s.
+ *
+ * @param s[in] The string to CRC.
+ * @return 16-bit CRC of s.
+ */
+int crc16(char *s);
+
+/**
+ * Returns null-terminated char* containing MD5 hash of input string.
+ *
+ * MD5 library from Christophe Devine, at the time available from http://www.cr0.net:8040/code/crypto/md5/.
+ *
+ * @param instr[in] The string to calculate the MD5 of.
+ * @return Null-terminated 32-character MD5 hash of input string.
+ */
+char *md5str(char *instr);
+
+/**
+ * Replaces 3-character encoded URI entities (%xx) in URL with the single character represented in hex.
+ *
+ * @param url[in] Null-terminated char* with embedded %xx sequences to be converted.
+ * @return Length of url string after replacements.
+ */
+int unescape_url(char *url);
+
+/**
+ * Helper function of `unescape_url`; returns the single character represented by a byte encoded hexadecimally passed as a 2-character sequence in what.
+ *
+ * Implementation notes;
+ *   - These two functions were taken from util.c in ftp://ftp.ncsa.uiuc.edu/Web/httpd/Unix/ncsa_httpd/cgi/ncsa-default.tar.Z
+ *   - Added ^M, ^F, etc. and +'s to blank translation on 01-Oct-06
+ *
+ * @param what[in] char* whose first 2 characters are interpreted as ASCII representations of a byte encoded hexadecimally.
+ * @return The single char corresponding to the characters passed in what.
+ */
+char x2c(char *what);
+
+/**
+ * Issues a system(command) call, but throttles command after killtime seconds if it hasn't already completed.
+ *
+ * Implementation notes;
+ *   - The timelimit() code is adapted from http://devel.ringlet.net/sysutils/timelimit/. Compile with `-DTIMELIMIT=\"$(which timelimit)\"` to use an installed
+ * copy of timelimit rather than this built-in code.
+ *   - If symbol `ISCOMPILETIMELIMIT` is false, a stub function that just issues system(command) is compiled instead.
+ *
+ * @param command[in] Null-terminated char* containing command to be executed.
+ * @param killtime[in] int containing maximum seconds to allow command to run.
+ * @return Return status from command, or -1 for any error.
+ */
+int timelimit(char *command, int killtime);
+
+/** Built-in limit functionality below. */
+#if ISCOMPILETIMELIMIT
+/** Signal handlers. */
+void sigchld(int sig);
+void sigalrm(int sig);
+void sighandler(int sig);
+
+int setsignal(int sig, void (*handler)(int));
+#endif
+
+/**
+ * Locates the first \\directive{arg1}{...}{argN} in string, returns arg1, ..., argN in args[], and removes \\directive and its args from string.
+ *
+ * Implementation notes;
+ *   - If optional [arg]'s are found, they're stored in the global optionalargs[] buffer, and the noptional counter is bumped.
+ *   - Set global argformat's decimal digits for each arg, e.g., 1357... means 1 for 1st arg, 3 for 2nd, 5 for 3rd, etc.
+ *     - 0 for an arg is the default format (i.e., argformat = 0), and means it's formatted as a LaTeX {arg} or [arg].
+ *     - 1 for an arg means arg terminated by first non-alpha char.
+ *     - 2 means arg terminated by '{' (e.g., as for /def).
+ *     - 8 means arg terminated by first whitespace char.
+ *
+ * @param string[in,out] Null-terminated char* from which the first occurrence of \\directive will be interpreted and removed.
+ * @param directive[in] Null-terminated char* containing the \\directive to be interpreted in string.
+ * @param iscase[in] int containing 1 if match of \\directive in string should be case-sensitive, or 0 if match is case-insensitive.
+ * @param isvalid[in] int containing validity check option; 0 = no checks, 1 = must be numeric.
+ * @param nargs[in] int containing (maximum) number of {args} following \directive, or 0 if none.
+ * @param args[out] void* interpreted as char* if nargs = 1 to return the one and only arg, or interpreted as char** if nargs > 1 to array of returned arg
+ * strings.
+ * @return Pointer to the first char after removed \\directive, or `NULL` if \\directive not found or any error.
+ */
+char *getdirective(char *string, char *directive, int iscase, int isvalid, int nargs, void *args);
+
+/**
+ * Preprocessor for mathTeX input. This function;
+ *   1. Removes leading/trailing $'s from $$expression$$
+ *   2. Translates HTML entities (&html and &#nnn) and other special chars to their equivalent LaTeX counterparts.
+ * Should only be called once (after `unescape_url()`).
+ *
+ * Implementation notes;
+ * - The ten special symbols ($, &, %, #, _, {, }, ~, ^, \\)  are reserved for use in LaTeX commands. The corresponding directives (\$, \&, \%, \#, \_, \{, \})
+ * display the first seven, respectively, and \backslash displays \. It's not clear to me whether or not mathprep() should substitute the displayed symbols,
+ * e.g., whether &#36; better translates to \$ or to $. Right now, it's the latter.
+ *
+ * @param expression[in,out] Null-terminated char* containing mathTeX/LaTeX expression to be processed.
+ * @return char* to input expression, or `NULL` for any parsing error.
+ */
+char *mathprep(char *expression);
+
+/**
+ * Find first substr in string, but wherever substr contains a whitespace char (in white), string may contain any number (including 0) of whitespace chars. If
+ * white contains I or i, then match is case-insensitive (and I, i *not* considered whitespace).
+ *
+ * Implementation notes;
+ *   - Wherever a single whitespace char appears in substr, the corresponding position in string may contain any number (including 0) of whitespace chars, e.g.,
+ * string="abc   def" and string="abcdef" both match substr="c d" at offset 2 of string.
+ *   - If substr="c  d" (two spaces between c and d), then string must have at least one space, so now "abcdef" doesn't match. In general, the minimum number of
+ * spaces in string is the number of spaces in substr minus 1 (so 1 space in substr permits 0 spaces in string).
+ *   - Embedded spaces are counted in sublen, e.g., string="c   d" (three spaces) matches substr="c d" with sublen=5 returned. But string="ab   c   d" will also
+ * match substr="  c d" returning sublen=5 and a ptr to the "c". That is, the mandatory preceding space is *not* counted as part of the match. But all the
+ * embedded space is counted. (An inconsistent bug/feature is that mandatory terminating space is counted.)
+ *   - Moreover, string="c   d" matches substr="  c d", i.e., the very beginning of a string is assumed to be preceded by "virtual blanks".
+ *
+ * @param string[in] Null-terminated char* in which first occurrence of substr will be found.
+ * @param substr[in] Null-terminated char* containing substring to be searched for.
+ * @param white[in] Null-terminated char* containing whitespace chars. If `NULL` or empty, then by default is set to " \t\n\r\f\v" (see #define WHITESPACE). If
+ * white contains I or i, then match is case-insensitive (and I, i *not* considered whitespace).
+ * @param sublen[out] int* representing "length" of substr found in string (which may be longer or shorter than substr itself).
+ * @return char* to first char of substr in string, or `NULL` if not found or for any error.
+ */
+char *strwstr(char *string, char *substr, char *white, int *sublen);
+
+/**
+ * Changes the first nreplace occurrences of 'from' to 'to' in string, or all occurrences if nreplace = 0.
+ *
+ * @param string[in,out] Null-terminated char* in which occurrence of 'from' will be replaced by 'to'.
+ * @param from[in] Null-terminated char* to be replaced by 'to'.
+ * @param to[in] Null-terminated char* that will replace 'from'.
+ * @param iscase[in] int containing 1 if matches of 'from' in 'string' should be case-sensitive, or 0 if matches are case-insensitive.
+ * @param nreplace[in] int containing (maximum) number of replacements, or 0 to replace all.
+ * @return number of replacements performed, or 0 for no replacements, or -1 for any error.
+ */
+int strreplace(char *string, char *from, char *to, int iscase, int nreplace);
+
+/**
+ * Changes the nfirst leading chars of 'from' to 'to'. For example, to change `char x[99] = "12345678"` to `"123ABC5678"`, call `strchange(1, x + 3, "ABC")`.
+ *
+ * Implementation notes;
+ * - If strlen(to) > nfirst, `from` must have memory past its `NULL` (i.e., we don't do a realloc).
+ *
+ * @param nfirst[in] int containing the number of leading chars of 'from' that will be replace by 'to'.
+ * @param from[in,out] Null-terminated char* whose nfirst leading chars will be replaced by 'to'.
+ * @param to[in] Null-terminated char* that will replace the nfirst leading chars of 'from'.
+ * @return char* to first char of input 'from', or `NULL` for any error.
+ */
+char *strchange(int nfirst, char *from, char *to);
+
+/**
+ * Determine whether any substring of 'string' matches any of the comma-separated list of 'snippets', ignoring case if iscase = 0.
+ *
+ * @param string[in] Null-terminated char* that will be searched for any one of the specified snippets.
+ * @param snippets[in] Null-terminated char* containing comma-separated list of snippets.
+ * @param iscase[in] int containing 0 for case-insensitive comparisons, or 1 for case-sensitive.
+ * @return 1 if any snippet is a substring of string, 0 if not.
+ */
+int isstrstr(char *string, char *snippets, int iscase);
+
+/**
+ * Removes/replaces any LaTeX math chars in s so that s can be rendered in paragraph mode.
+ *
+ * @param s[in] Null-terminated char* whose math chars are to be removed/replaced.
+ * @return The string with any math characters replaced. The returned pointer addresses a static buffer, so don't call nomath() again until you're finished with
+ * output from the preceding call.
+ */
+char *nomath(char *s);
+
+/**
+ * Inserts \\n's and spaces in (a copy of) s to wrap lines at linelen and indent them by tablen.
+ *
+ * Implementation notes;
+ * - The returned copy of s has embedded \n's as necessary to wrap lines at linelen.  Any \n's in the input copy are removed first.  If (and only if) the input
+ * s contains a terminating \\n then so does the returned copy.
+ *
+ * @param s[in] Null-terminated char* to be wrapped.
+ * @param linelen[in] int containing maximum linelen between \\n's.
+ * @param tablen[in] int containing number of spaces to indent lines. 0 = no indent. Positive means only indent first line and not others. Negative means indent
+ * all lines except first.
+ * @return The returned copy of s has embedded \\n's as necessary to wrap lines at linelen. Any \\n's in the input copy are removed first. If (and only if) the
+ * input s contains a terminating \\n then so does the returned copy. The returned pointer addresses a static buffer, so don't call strwrap() again until you're
+ * finished with output from the preceding call.
+ */
+char *strwrap(char *s, int linelen, int tablen);
+
+/**
+ * Finds the initial segment of s containing no chars in reject that are outside (), [] and {} parens. For example `strpspn("abc(---)def+++", "+-", segment)`
+ * returns `segment = "abc(---)def"` and a pointer to the first '+' in s, because the '-'s are enclosed in () parenthesis.
+ *
+ * Implementation notes;
+ *   - The return value is _not_ like strcspn()'s.
+ *   - Improperly nested strings, i.e. "(...[...)...]", are not detected, but are considered "balanced" after the ']'.
+ *   - If reject not found, segment returns the entire string s.
+ *   - ...but if reject is empty, returns segment up to and including matching ')]}'.
+ *   - Leading/trailing whitespace is trimmed from returned segment.
+ *
+ * @param s[in] Null-terminated char* whose initial segment is desired.
+ * @param reject[in] Null-terminated char* containing the "reject chars". If reject contains a " or a ', then the " or ' isn't itself a reject char, but other
+ * reject chars within quoted strings (or substrings of s) are spanned.
+ * @param segment[out] Null-terminated char* comprising the initial segment of s that contains non-rejected chars outside relevant parenthesis ((), [], {});
+ * i.e., all the chars up to but not including the returned pointer. (That's the entire string if no non-rejected chars are found.)
+ * @return Pointer to first reject-char found in s outside parenthesis, or a pointer to the terminating '\000' of s if there are no reject chars in s outside
+ * all () parenthesis. But if reject is empty, returns pointer to matching ')]}' outside all parens.
+ */
+char *strpspn(char *s, char *reject, char *segment);
+
+/**
+ * Finds matching/closing " or ' in quoted string that begins with " or ', and optionally changes escaped quotes to unescaped quotes.
+ *
+ * Implementation notes;
+ *   - Note: the following not implemented yet -- If unescape is negative, its abs() is used, but outer quotes aren't included in q.
+ *
+ * @param s[in] Null-terminated char* that begins with " or '.
+ * @param q[out] Null-terminated char* containing quoted token, with or without outer quotes, and with or without escaped inner quotes changed to unescaped
+ * quotes, depending on isunescape.
+ * @param isunescape[in] int containing 1 to change \" to " if s is "quoted" or change \' to ' if 'quoted', or containing 2 to change both \" and \' to
+ * unescaped quotes. Other \sequences aren't changed. Note that \\" still emits \". isunescape = 0 makes no changes at all.
+ * @return pointer to matching/closing " or ' (or to char after quote if isunescape < 0), or terminating '\000' if none found, or unchanged (same as s) if not
+ * quoted string.
+ */
+char *strqspn(char *s, char *q, int isunescape);
+
+/**
+ * Determines if s is an integer.
+ *
+ * @param s[in] Null-terminated char* that's checked for a leading + or -, followed by digits.
+ * @return 1 if s is numeric, 0 if it is not.
+ */
+int isnumeric(char *s);
+
+/**
+ * Evaluates a term.
+ *
+ * @param store[in,out] struct store_struct* containing environment in which term is to be evaluated.
+ * @param term[in] Null-terminated char* with a term like "3" or "a" or "a+3" whose value is to be determined.
+ * @return value of term, or NOVALUE for any error.
+ */
+int evalterm(struct store_struct *store, char *term);
+
+/**
+ * Finds identifier in store and returns corresponding value.
+ *
+ * @param store[in] struct store_struct* to store containing the desired identifier.
+ * @param identifier[in] Null-terminated char* containing the identifier whose value is to be returned.
+ * @return identifier's corresponding value, or 0 if identifier not found or if an error occured.
+ */
+int getstore(struct store_struct *store, char *identifier);
