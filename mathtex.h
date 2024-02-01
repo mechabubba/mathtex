@@ -338,6 +338,8 @@ static char *dclass = "article";     // directive class
  */
 #define LATEXERRORCOUNT 5     // the amount of errors to detect.
 #define LATEXSTACKLENGTH 1024 // temp until something better comes along
+static char **errors;
+static int errorcount;
 
 /* ---
  * default uses locatepath() if whichpath() fails
@@ -491,9 +493,9 @@ static char latexdefaultwrapper[MAXEXPRSZ + 16384] =
     //"\\newcommand{\\fs}{{\\eval{fs}}}\n" /* \eval{} test */
     "%%fontsize%%\n"
     "%%setlength%%\n"
-    "%%beginmath%% "
-    "%%expression%% \n" /* \n in case expression contains %*/
-    " %%endmath%%\n"
+    "%%beginmath%%\n"
+    "%%expression%%\n" /* \n in case expression contains %*/
+    "%%endmath%%\n"
     "\\end{document}\n";
 
 /* ---
@@ -530,9 +532,9 @@ static char latexdepthwrapper[MAXEXPRSZ + 16384] =
     "%%setlength%%\n"
     "\n"
     "\\begin{lrbox}{\\mybox}\n"
-    "%%beginmath%% "
-    "%%expression%% \n" /* \n in case expression contains %*/
-    " %%endmath%%\n"
+    "%%beginmath%%\n" 
+    "%%expression%%\n"
+    "%%endmath%%\n"
     "\\end{lrbox}\n"
     "\n"
     "\\settowidth {\\mywidth}  {\\usebox{\\mybox}}\n"

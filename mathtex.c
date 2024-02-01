@@ -569,20 +569,6 @@ int main(int argc, char *argv[]) {
             if (msgnumber < 1) {
                 // if nothing specific, emit general error message.
                 msgnumber = 2;
-            } else if (msgnumber == LATEXFAILED) {
-                // if the latex command failed, search for an answer.
-                char filename[96];
-                sprintf(filename, "%s/latex.log", md5hash);
-                char *path = makepath(NULL, filename, NULL);
-                if (isfexists(path)) {
-                    char errors[LATEXERRORCOUNT][1024];
-                    int status = checkerrors(path, errors);
-                    if (status != -1) {
-                        for (int i = 0; i < status; i++) { log_error(errors[i]); }
-                    } else if (status == 0) {
-                        log_error("No errors found in log. (How did we get here?)\n");
-                    }
-                }
             }
             log_error(embeddedtext[msgnumber]);
             goto end_of_job;
@@ -650,8 +636,8 @@ int mathtex(char *expression, char *filename) {
     char giffile[256] = "\000";
     FILE *latexfp = NULL;                 /*latex wrapper file for expression*/
     char command[2048], subcommand[1024]; /*system(command) runs latex, etc*/
-    char *beginmath[] = {" \\noindent $\\displaystyle ", " \\noindent $ ", " "};
-    char *endmath[] = {" $ ", " $ ", " "};
+    char *beginmath[] = {"\\noindent \\(\n\\displaystyle", "\\noindent \\(", ""};
+    char *endmath[] = {"\\)", "\\)", ""};
     int perm_all = (S_IRWXU | S_IRWXG | S_IRWXO); /* 777 permissions */
     int dir_stat = 0;                             /* 1=mkdir okay, 2=chdir okay */
     int sys_stat = 0;                             /* system() return status */
@@ -816,6 +802,30 @@ int mathtex(char *expression, char *filename) {
             msgnumber = sys_stat == 127 ? SYLTXFAILED : LATEXFAILED; /* latex failed for whatever reason */
             goto end_of_job;
         } /* and quit */
+    } else {
+        // system() does not return a value other than 0 if the render goes wrongly.
+        // thus, we need to check the error log ourselves. using a handy global variable for this.
+        char logname[96];
+        sprintf(logname, "%s/latex", filename);
+        char *logpath = makepath("", "latex", ".log");
+        if (isfexists(logpath)) {
+            char **errors = malloc(sizeof(char *) * LATEXERRORCOUNT); // dynamically allocate some pointers for our error messages.
+            int num = checkerrors(filename, errors);
+            if (num == -1) {
+                log_error("An error occured whilst parsing the latex log for errors. Continuing as if nothing went wrong...");
+            } else if (num != 0) {
+                // errors were parsed.
+                for (int i = 0; i < num; i++) {
+                    //log_error(errors[i]);
+                    if (msglevel >= 0) {
+                        fprintf(stderr, errors[i]);
+                    }
+                }
+                fflush(stderr);
+                msgnumber = sys_stat == 127 ? SYLTXFAILED : LATEXFAILED;
+                goto end_of_job;
+            }
+        }
     }
 
     /* -------------------------------------------------------------------------
@@ -1161,6 +1171,61 @@ end_of_job:
 
 int checkerrors(char *filename, char **errors) {
     int current_error = 0;
+    FILE *fp = fopen(makepath("", "latex", "log"), "r"); // authors note: need to use makepath func to load the right file
+
+    if (!fp) {
+        goto set_error_code;
+    }
+
+    // load file into memory
+    fseek(fp, 0, SEEK_END);
+    int filesize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    
+    char *filebuf = malloc(sizeof(char) * filesize);
+    fread(filebuf, sizeof filebuf[0], filesize, fp);
+    
+    regex_t preg;
+    if ((regcomp(&preg, "(!(\\n|.)*?)\\?", (REG_EXTENDED))) != 0) { // old: "(![[:space:]]+?)\\?"
+        goto set_error_code;
+    }
+
+    regmatch_t groups[LATEXERRORCOUNT];
+    int matchres = regexec(&preg, filebuf, LATEXERRORCOUNT, &groups, 0);
+    if (matchres != REG_NOMATCH) {
+        // we got somefin. do some fucked up shit
+        //for (int j = 0; j < LATEXERRORCOUNT; j++) {
+            //if (groups[j].rm_so == -1) continue;
+            //int size = (groups[j].rm_eo - groups[j].rm_so) - 0; // chop off last '?' character 
+            int size = (groups[0].rm_eo - groups[0].rm_so);
+            errors[current_error] = malloc(sizeof(char) * size);
+            if (errors[current_error]) {
+                //memcpy(errors[current_error], (filebuf + groups[j].rm_so), size);
+                memcpy(errors[current_error], (filebuf + groups[0].rm_so), size);
+            }
+            errors[current_error][size - 1] = '\0'; // throw a null on the end of that
+            current_error++;
+        //}
+        // most of the above code is for checking each group.
+        // turns out they all get bunched into the first group for some reason? i dont know man posix regex fucking blows
+    }
+
+    free(filebuf);
+
+end_of_job:
+    if (fp != NULL) fclose(fp);
+    if (&preg) regfree(&preg);
+    return current_error;
+
+set_error_code:
+    // goto statements are evil but this program is ridden with em so if you cant beat em join em
+    current_error = -1;
+    goto end_of_job;
+}
+
+#if 0
+int checkerrors(char *filename, char **errors) {
+    int current_error = 0;
     regex_t preg;
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) { goto set_error_code; }
@@ -1184,7 +1249,7 @@ int checkerrors(char *filename, char **errors) {
                 line[0] = ' ';
                 iserror = 0;
                 errors[current_error] = buffer;
-                &buffer = calloc(LATEXSTACKLENGTH, sizeof(char));
+                *buffer = calloc(LATEXSTACKLENGTH, sizeof(char));
                 current_error++;
             } else {
                 strcat(errors[current_error], line);
@@ -1220,6 +1285,7 @@ set_error_code:
     current_error = -1;
     goto end_of_job;
 }
+#endif
 
 // ! NOT CURRENTLY IN USE, MAY BE USEFUL LATER... KEEPING IT AROUND !
 // int isnotfound(char *filename) {

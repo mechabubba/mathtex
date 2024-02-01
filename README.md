@@ -1,5 +1,11 @@
-10/18/23: This program has been updated quite a bit. No longer a cgi app, now a standalone command line app.
-The README below is pretty outdated. New one to be written at a later date.
+# mathtex
+Don't use this thing, it sucks. I wrote it because I wanted a binary that rendered LaTeX strings and I didn't really know how LaTeX worked and there was this standalone C file made by [this guy](http://www.forkosh.com/) with a permissable license so I figured "hey, two kill birds with one stone, fuck around and find out with C and get latex images" and here we are. Just write your own in a language that can handle doing certain things (like string manipulation and command-line execution) better.
+
+<details>
+<summary>Original README</summary>
+
+<pre>10/18/23: This program has been updated quite a bit. No longer a cgi app, now a standalone command line app.
+The README below is pretty outdated. New one to be written at a later date; in the meantime, see the header of the mathtex.c file.
 
  --------------------------------------------------------------------------
  December 6, 2014                                              Version 1.05
@@ -32,19 +38,19 @@ I.   INTRODUCTION
   easily embed LaTeX math in your own html pages, blogs, wikis, etc.
   It parses a LaTeX math expression and immediately emits the
   corresponding gif (or png) image, rather than the usual TeX dvi.
-  So just place an html <img> tag in your document wherever you want
+  So just place an html <​img> tag in your document wherever you want
   to see the corresponding LaTeX expression.  For example,
-        <img src="/cgi-bin/mathtex.cgi?f(x)=\int_{-\infty}^xe^{-t^2}dt"
+        <​img src="/cgi-bin/mathtex.cgi?f(x)=\int_{-\infty}^xe^{-t^2}dt"
         alt="" border=0 align="middle">
   immediately displays the corresponding gif image wherever you put
-  that <img> tag.
+  that <​img> tag.
 
-  There's no inherent need to repeatedly write the cumbersome <img> tag
+  There's no inherent need to repeatedly write the cumbersome <​img> tag
   illustrated above.  For example, if you're using phpBB3, just click
   Postings from the Administrator Control Panel, and add the Custom BBCode
         [tex]{TEXT}[/tex]
   with the HTML replacement
-        <img src="/cgi-bin/mathtex.cgi?{TEXT}" align="middle">
+        <​img src="/cgi-bin/mathtex.cgi?{TEXT}" align="middle">
   Then users can just type
         [tex] f(x)=\int_{-\infty}^xe^{-t^2}dt [/tex]
   in their posts to see a gif image of the enclosed expression.
@@ -174,4 +180,5 @@ IV.  CONCLUDING REMARKS
   country's TeX Users Group, or to the GNU project, is suggested,
   especially if you're a company that's currently profitable.
 ========================= END-OF-FILE README ===========================
-
+</pre>
+</details>
