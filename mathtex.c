@@ -229,20 +229,23 @@ int main(int argc, char *argv[]) {
     /* ---
      * check for embedded image \message directive (which supercedes everything)
      * ----------------------------------------------------------------------- */
+#ifdef DISABLE_MESSAGE_DIRECTIVE
     if (getdirective(expression, "\\message", 1, 0, 1, argstring) != NULL) { /* found \message directive */
         log_info(1, "%s%s\n", about, license);
         msgnumber = atoi(argstring); /* requested message number */
         if (msgnumber > MAXEMBEDDED) {
-            log_error("Invalid message number provided.");
+            log_error("Invalid message number provided.\n");
         } else {
             log_error("%s\n", embeddedtext[msgnumber]);
         }
         goto end_of_job;
     } /*nothing to do after emitting image*/
+#endif
 
     /* ---
      * check for \switches directive (which supercedes everything else)
      * ---------------------------------------------------------------- */
+#ifdef DISABLE_SWITCHES_DIRECTIVE
     if (strreplace(expression, "\\switches", "", 0, 0) >= 1) { /* remove \switches */
         char *pathsource[] = {"default", "switch", "which", "locate"};
         *expression = '\000';                         /* reset expression */
@@ -265,10 +268,12 @@ int main(int argc, char *argv[]) {
                 pathsource[isconvertpath]); // convert path
         strcat(expression, "}");            /* end of \fparbox{} */
     }
+#endif
 
     /* ---
      * check for \environment directive (which supercedes everything else)
      * ------------------------------------------------------------------- */
+#ifdef DISABLE_ENVIRONMENT_DIRECTIVE
     if (strreplace(expression, "\\environment", "", 0, 0)                                                       /* remove \environment */
         >= 1) {                                                                                                 /* found \environment */
         int ienv = 0;                                                                                           /* environ[] index */
@@ -287,6 +292,7 @@ int main(int argc, char *argv[]) {
         }
         strcat(expression, "\\end{verbatim}"); /* end verbatim environment */
     }
+#endif
 
     /* ---
      * save copy of expression before further preprocessing for MD5 hash
@@ -296,6 +302,7 @@ int main(int argc, char *argv[]) {
     /* ---
      * check for \which directive (supercedes everything not above)
      * ------------------------------------------------------------ */
+#ifdef DISABLE_SWITCHES_DIRECTIVE
     if (getdirective(expression, "\\which", 1, 0, 1, argstring) != NULL) { /* found \which directive */
         int ispermitted = 1;                                               /* true if a legitimate request */
         int nlocate = 1;                                                   /* use locate if which fails */
@@ -333,6 +340,7 @@ int main(int argc, char *argv[]) {
         //);                       /* display path or "not found" */
         // strcat(expression, "}"); /* end of \fparbox{} */
     }
+#endif
 
     /* ---
      * check for picture environment, i.e., \begin{picture}, but don't remove it

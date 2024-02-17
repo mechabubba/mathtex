@@ -266,6 +266,20 @@ static int tmp_cache = TMP_CACHE;
 #endif
 static int keep_work = KEEP_WORK;
 
+/* defs to disable custom directives */
+#if !defined(DISABLE_MESSAGE_DIRECTIVE)
+    #define DISABLE_MESSAGE_DIRECTIVE 0 /* this ones safe enough and potentially useful, keeping it available */
+#endif
+#if !defined(DISABLE_SWITCHES_DIRECTIVE)
+    #define DISABLE_SWITCHES_DIRECTIVE 1
+#endif
+#if !defined(DISABLE_ENVIRONMENT_DIRECTIVE)
+    #define DISABLE_ENVIRONMENT_DIRECTIVE 1
+#endif
+#if !defined(DISABLE_WHICH_DIRECTIVE)
+    #define DISABLE_WHICH_DIRECTIVE 1
+#endif
+
 /* ---
  * timelimit -tWARNTIME -TKILLTIME
  * ------------------------------- */
