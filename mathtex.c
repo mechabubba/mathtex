@@ -226,10 +226,10 @@ int main(int argc, char *argv[]) {
     mathprep(expression);     // preprocess expression; convert &lt; to < and whatnot
     validate(expression);     // remove dangerous stuff like \input
 
+#ifdef ENABLE_MESSAGE_DIRECTIVE
     /* ---
      * check for embedded image \message directive (which supercedes everything)
      * ----------------------------------------------------------------------- */
-#ifdef DISABLE_MESSAGE_DIRECTIVE
     if (getdirective(expression, "\\message", 1, 0, 1, argstring) != NULL) { /* found \message directive */
         log_info(1, "%s%s\n", about, license);
         msgnumber = atoi(argstring); /* requested message number */
@@ -242,10 +242,10 @@ int main(int argc, char *argv[]) {
     } /*nothing to do after emitting image*/
 #endif
 
+#ifdef ENABLE_SWITCHES_DIRECTIVE
     /* ---
      * check for \switches directive (which supercedes everything else)
      * ---------------------------------------------------------------- */
-#ifdef DISABLE_SWITCHES_DIRECTIVE
     if (strreplace(expression, "\\switches", "", 0, 0) >= 1) { /* remove \switches */
         char *pathsource[] = {"default", "switch", "which", "locate"};
         *expression = '\000';                         /* reset expression */
@@ -270,10 +270,10 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
+#ifdef ENABLE_ENVIRONMENT_DIRECTIVE
     /* ---
      * check for \environment directive (which supercedes everything else)
      * ------------------------------------------------------------------- */
-#ifdef DISABLE_ENVIRONMENT_DIRECTIVE
     if (strreplace(expression, "\\environment", "", 0, 0)                                                       /* remove \environment */
         >= 1) {                                                                                                 /* found \environment */
         int ienv = 0;                                                                                           /* environ[] index */
@@ -299,10 +299,10 @@ int main(int argc, char *argv[]) {
      * ------------------------------------------------------------------ */
     strcpy(hashexpr, expression); /* save unmodified expr for hash */
 
+#ifdef DISABLE_SWITCHES_DIRECTIVE
     /* ---
      * check for \which directive (supercedes everything not above)
      * ------------------------------------------------------------ */
-#ifdef DISABLE_SWITCHES_DIRECTIVE
     if (getdirective(expression, "\\which", 1, 0, 1, argstring) != NULL) { /* found \which directive */
         int ispermitted = 1;                                               /* true if a legitimate request */
         int nlocate = 1;                                                   /* use locate if which fails */
