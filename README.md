@@ -1,6 +1,8 @@
 # mathtex
 Don't use this thing, it sucks. I wrote it because I wanted a binary that rendered LaTeX strings and I didn't really know how LaTeX worked and there was this standalone C file made by [this guy](http://www.forkosh.com/) with a permissable license so I figured "hey, two kill birds with one stone, fuck around and find out with C and get latex images" and here we are. Just write your own in a language that can handle doing certain things (like string manipulation and command-line execution) better.
 
+For context, I built this to be able to render latex images in my [Discord bot.](https://github.com/mechabubba/bear) Its still functional, but every once and a while it breaks. It is what it is...
+
 <details>
 <summary>Original README</summary>
 
